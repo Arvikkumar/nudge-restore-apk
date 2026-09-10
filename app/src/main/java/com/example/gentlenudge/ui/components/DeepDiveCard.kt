@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.HourglassBottom
 import androidx.compose.material.icons.outlined.Notifications
@@ -60,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -233,22 +235,31 @@ fun DeepDiveCard(
                     }
                 }
 
-                // Right action hint icon
+                // Right circular Play button (Start Deep Dive action)
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(50.dp)
+                        .shadow(
+                            elevation = 4.dp,
+                            shape = CircleShape,
+                            ambientColor = NudgeBlue.copy(alpha = 0.25f),
+                            spotColor = NudgeBlue.copy(alpha = 0.35f)
+                        )
                         .clip(CircleShape)
                         .background(
-                            if (isActuallyActive) NudgeBlue.copy(alpha = 0.15f)
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            if (isActuallyActive) NudgeBlue.copy(alpha = 0.85f) else NudgeBlue
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (isActuallyActive) Icons.Outlined.HourglassBottom else Icons.Outlined.Schedule,
-                        contentDescription = "Deep Dive action",
-                        tint = if (isActuallyActive) NudgeBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp)
+                        imageVector = if (isActuallyActive) Icons.Outlined.HourglassBottom else Icons.Filled.PlayArrow,
+                        contentDescription = "Start Deep Dive",
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .then(
+                                if (!isActuallyActive) Modifier.padding(start = 2.dp) else Modifier
+                            )
                     )
                 }
             }

@@ -26,9 +26,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -728,16 +734,105 @@ fun SettingToggleRow(
             )
         }
 
-        Switch(
+        NudgeIconToggle(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = NudgeBlue,
-                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
-            )
+            contentDescription = title
         )
+    }
+}
+
+@Composable
+fun NudgeIconToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    contentDescription: String? = null
+) {
+    val trackWidth = 52.dp
+    val trackHeight = 30.dp
+    val thumbSize = 24.dp
+    val trackPadding = 3.dp
+
+    // Animation values
+    val trackColor by animateColorAsState(
+        targetValue = if (checked) NudgeBlue else MaterialTheme.colorScheme.surfaceVariant,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "nudge_toggle_track_color"
+    )
+
+    val thumbOffset by animateDpAsState(
+        targetValue = if (checked) (trackWidth - thumbSize - trackPadding) else trackPadding,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "nudge_toggle_thumb_offset"
+    )
+
+    // Touch target wrapper to ensure >= 48dp x 48dp accessibility standard
+    Box(
+        modifier = modifier
+            .size(width = 56.dp, height = 48.dp)
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onValueChange = onCheckedChange
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        // Pill track
+        Box(
+            modifier = Modifier
+                .size(width = trackWidth, height = trackHeight)
+                .clip(RoundedCornerShape(trackHeight / 2))
+                .background(trackColor)
+        ) {
+            // ON icon: subtle white checkmark on the left side of track
+            Box(
+                modifier = Modifier
+                    .size(width = trackWidth - thumbSize - trackPadding, height = trackHeight)
+                    .align(Alignment.CenterStart)
+                    .padding(start = 7.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (checked) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.95f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
+            // OFF icon: subtle soft gray cross on the right side of track
+            Box(
+                modifier = Modifier
+                    .size(width = trackWidth - thumbSize - trackPadding, height = trackHeight)
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 7.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                if (!checked) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+
+            // Circular white thumb
+            Box(
+                modifier = Modifier
+                    .padding(start = thumbOffset)
+                    .align(Alignment.CenterStart)
+                    .size(thumbSize)
+                    .clip(CircleShape)
+                    .background(Color.White)
+            )
+        }
     }
 }
 
