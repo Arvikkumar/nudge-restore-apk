@@ -20,6 +20,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -127,6 +128,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.zIndex
@@ -3266,78 +3268,132 @@ private fun ExportPdfView(
                                 }
                             }
 
-                            // Primary Action Button
+                            // Primary Action Button (Soft Blue Tint Design)
                             if (exportMode == ExportMode.SINGLE_MONTH) {
-                                Button(
-                                    onClick = {
-                                        onExportPdf(
-                                            TimeGoalsPdfOptions(
-                                                includeSummary = includeSummary,
-                                                includeGoalsList = includeGoalsList,
-                                                includeCalendarGrid = includeCalendarGrid,
-                                                includeDailyRecords = includeDailyRecords,
-                                                includeInsights = includeInsights
-                                            )
-                                        )
-                                    },
+                                val singleInteractionSource = remember { MutableInteractionSource() }
+                                val isSinglePressed by singleInteractionSource.collectIsPressedAsState()
+
+                                val singleElevation by animateDpAsState(
+                                    targetValue = if (isSinglePressed) 2.dp else 6.dp,
+                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                                    label = "pdf_single_elevation"
+                                )
+
+                                val singleTranslationY by animateDpAsState(
+                                    targetValue = if (isSinglePressed) 1.dp else 0.dp,
+                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                                    label = "pdf_single_translation_y"
+                                )
+
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(50.dp)
+                                        .height(56.dp)
+                                        .graphicsLayer {
+                                            translationY = singleTranslationY.toPx()
+                                        }
+                                        .shadow(
+                                            elevation = singleElevation,
+                                            shape = RoundedCornerShape(20.dp),
+                                            clip = false,
+                                            ambientColor = Color(0x14000000),
+                                            spotColor = Color(0x1F000000)
+                                        )
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(Color(0xFFEFF6FF))
+                                        .clickable(
+                                            interactionSource = singleInteractionSource,
+                                            indication = null,
+                                            role = Role.Button
+                                        ) {
+                                            onExportPdf(
+                                                TimeGoalsPdfOptions(
+                                                    includeSummary = includeSummary,
+                                                    includeGoalsList = includeGoalsList,
+                                                    includeCalendarGrid = includeCalendarGrid,
+                                                    includeDailyRecords = includeDailyRecords,
+                                                    includeInsights = includeInsights
+                                                )
+                                            )
+                                        }
                                         .testTag("btn_generate_hours_pdf"),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = NudgeBlue)
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Share,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(19.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = "Generate & Share PDF",
-                                        style = MaterialTheme.typography.labelLarge.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp
-                                        )
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 16.sp
+                                        ),
+                                        color = Color(0xFF1E3A8A)
                                     )
                                 }
                             } else {
-                                Button(
-                                    onClick = {
-                                        if (canExportMulti) {
-                                            val options = TimeGoalsPdfOptions(
-                                                includeSummary = includeSummary,
-                                                includeGoalsList = includeGoalsList,
-                                                includeCalendarGrid = includeCalendarGrid,
-                                                includeDailyRecords = includeDailyRecords,
-                                                includeInsights = includeInsights
-                                            )
-                                            onExportMultiMonthPdf?.invoke(rangeStartMonth, rangeEndMonth, options)
-                                        }
+                                val multiInteractionSource = remember { MutableInteractionSource() }
+                                val isMultiPressed by multiInteractionSource.collectIsPressedAsState()
+
+                                val multiElevation by animateDpAsState(
+                                    targetValue = when {
+                                        !canExportMulti -> 0.dp
+                                        isMultiPressed -> 2.dp
+                                        else -> 6.dp
                                     },
-                                    enabled = canExportMulti,
+                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                                    label = "pdf_multi_elevation"
+                                )
+
+                                val multiTranslationY by animateDpAsState(
+                                    targetValue = if (canExportMulti && isMultiPressed) 1.dp else 0.dp,
+                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                                    label = "pdf_multi_translation_y"
+                                )
+
+                                val multiBgColor = if (canExportMulti) Color(0xFFEFF6FF) else Color(0xFFF3F4F6)
+                                val multiTextColor = if (canExportMulti) Color(0xFF1E3A8A) else Color(0xFF9CA3AF)
+
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(50.dp)
+                                        .height(56.dp)
+                                        .graphicsLayer {
+                                            translationY = multiTranslationY.toPx()
+                                        }
+                                        .shadow(
+                                            elevation = multiElevation,
+                                            shape = RoundedCornerShape(20.dp),
+                                            clip = false,
+                                            ambientColor = Color(0x14000000),
+                                            spotColor = Color(0x1F000000)
+                                        )
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(multiBgColor)
+                                        .clickable(
+                                            interactionSource = multiInteractionSource,
+                                            indication = null,
+                                            enabled = canExportMulti,
+                                            role = Role.Button
+                                        ) {
+                                            if (canExportMulti) {
+                                                val options = TimeGoalsPdfOptions(
+                                                    includeSummary = includeSummary,
+                                                    includeGoalsList = includeGoalsList,
+                                                    includeCalendarGrid = includeCalendarGrid,
+                                                    includeDailyRecords = includeDailyRecords,
+                                                    includeInsights = includeInsights
+                                                )
+                                                onExportMultiMonthPdf?.invoke(rangeStartMonth, rangeEndMonth, options)
+                                            }
+                                        }
                                         .testTag("btn_generate_hours_pdf"),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = NudgeBlue,
-                                        disabledContainerColor = NudgeBlue.copy(alpha = 0.4f)
-                                    )
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Share,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(19.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = if (monthsCount > 1) "Generate & Share PDF ($monthsCount Months)" else "Generate & Share PDF (1 Month)",
-                                        style = MaterialTheme.typography.labelLarge.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp
-                                        )
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 16.sp
+                                        ),
+                                        color = multiTextColor
                                     )
                                 }
                             }

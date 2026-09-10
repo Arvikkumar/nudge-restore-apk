@@ -3,9 +3,15 @@ package com.example.gentlenudge.ui.components
 import android.app.TimePickerDialog
 import android.text.format.DateFormat
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,8 +70,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -698,13 +706,43 @@ fun DeepDiveConfigSheet(
 
             Spacer(modifier = Modifier.height(2.dp))
 
-            // Bottom action button: Simple, clean, professional pale-blue button with centered "Begin"
-            Surface(
+            // Bottom action button: Soft Blue Tint "Begin" button (#EFF6FF, #1E3A8A text, 20dp corners, soft shadow)
+            val beginInteractionSource = remember { MutableInteractionSource() }
+            val isBeginPressed by beginInteractionSource.collectIsPressedAsState()
+
+            val beginElevation by animateDpAsState(
+                targetValue = if (isBeginPressed) 2.dp else 6.dp,
+                animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                label = "begin_elevation"
+            )
+
+            val beginTranslationY by animateDpAsState(
+                targetValue = if (isBeginPressed) 1.dp else 0.dp,
+                animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                label = "begin_translation_y"
+            )
+
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
-                    .clip(RoundedCornerShape(28.dp))
-                    .clickable {
+                    .graphicsLayer {
+                        translationY = beginTranslationY.toPx()
+                    }
+                    .shadow(
+                        elevation = beginElevation,
+                        shape = RoundedCornerShape(20.dp),
+                        clip = false,
+                        ambientColor = Color(0x14000000),
+                        spotColor = Color(0x1F000000)
+                    )
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFFEFF6FF))
+                    .clickable(
+                        interactionSource = beginInteractionSource,
+                        indication = null,
+                        role = Role.Button
+                    ) {
                         if (selectedOption == "Custom" && customTargetMillis <= System.currentTimeMillis()) {
                             openCustomTimePicker()
                         } else {
@@ -713,22 +751,16 @@ fun DeepDiveConfigSheet(
                         }
                     }
                     .testTag("start_deep_dive_button"),
-                shape = RoundedCornerShape(28.dp),
-                color = Color(0xFFF1F5FD)
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Begin",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        ),
-                        color = Color(0xFF161513)
-                    )
-                }
+                Text(
+                    text = "Begin",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp
+                    ),
+                    color = Color(0xFF1E3A8A)
+                )
             }
         }
     }

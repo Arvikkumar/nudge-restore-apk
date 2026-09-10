@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -176,7 +177,22 @@ object TimeGoalsPdfExporter {
             }
         }
 
-        // 5. Monthly Review & Insights
+        // 5. Time Distribution & Streak / Day Statistics
+        if (overallProgress.goalProgressList.isNotEmpty()) {
+            val neededHeight = calculateTimeDistributionHeight(overallProgress.goalProgressList.size)
+            if (currentY + neededHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
+                startNextPage()
+            }
+            currentY = drawTimeDistributionSection(
+                canvas = canvas,
+                startY = currentY,
+                yearMonth = yearMonth,
+                overallProgress = overallProgress,
+                records = records
+            )
+        }
+
+        // 6. Monthly Review & Insights
         if (options.includeInsights && overallProgress.goalProgressList.isNotEmpty()) {
             if (currentY + 160f > PAGE_HEIGHT - MARGIN_BOTTOM) {
                 startNextPage()
@@ -291,7 +307,22 @@ object TimeGoalsPdfExporter {
                 }
             }
 
-            // 5. Monthly Review & Insights
+            // 5. Time Distribution & Streak / Day Statistics
+            if (overallProgress.goalProgressList.isNotEmpty()) {
+                val neededHeight = calculateTimeDistributionHeight(overallProgress.goalProgressList.size)
+                if (currentY + neededHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
+                    startNextPage()
+                }
+                currentY = drawTimeDistributionSection(
+                    canvas = canvas,
+                    startY = currentY,
+                    yearMonth = ym,
+                    overallProgress = overallProgress,
+                    records = records
+                )
+            }
+
+            // 6. Monthly Review & Insights
             if (options.includeInsights && overallProgress.goalProgressList.isNotEmpty()) {
                 if (currentY + 160f > PAGE_HEIGHT - MARGIN_BOTTOM) {
                     startNextPage()
@@ -959,6 +990,326 @@ object TimeGoalsPdfExporter {
         canvas.drawText(summaryLine, MARGIN_LEFT + 12f, startY + 48f, summaryPaint)
 
         return startY + cardHeight + 10f
+    }
+
+    data class MonthlyStreakStats(
+        val currentStreak: Int,
+        val longestStreak: Int,
+        val activeDays: Int,
+        val missedDays: Int
+    )
+
+    private fun calculateMonthlyStreakStats(
+        yearMonth: YearMonth,
+        records: List<TimeGoalRecord>,
+        today: LocalDate = LocalDate.now()
+    ): MonthlyStreakStats {
+        val daysInMonth = yearMonth.lengthOfMonth()
+        val lastEvaluatedDay = when {
+            yearMonth.isBefore(YearMonth.from(today)) -> daysInMonth
+            yearMonth == YearMonth.from(today) -> minOf(today.dayOfMonth, daysInMonth)
+            else -> 0
+        }
+
+        val isDayActive = BooleanArray(daysInMonth + 1)
+        for (day in 1..daysInMonth) {
+            val dateStr = TimeGoalCalculations.formatLocalDate(yearMonth.atDay(day))
+            isDayActive[day] = records.any { it.date == dateStr && it.actualMinutes > 0 }
+        }
+
+        val activeDays = (1..daysInMonth).count { isDayActive[it] }
+
+        val missedDays = if (lastEvaluatedDay > 0) {
+            (1..lastEvaluatedDay).count { !isDayActive[it] }
+        } else {
+            0
+        }
+
+        var longestStreak = 0
+        var run = 0
+        for (day in 1..daysInMonth) {
+            if (isDayActive[day]) {
+                run++
+                if (run > longestStreak) longestStreak = run
+            } else {
+                run = 0
+            }
+        }
+
+        var currentStreak = 0
+        if (lastEvaluatedDay > 0) {
+            val startDay = if (yearMonth == YearMonth.from(today) && !isDayActive[lastEvaluatedDay] && lastEvaluatedDay > 1 && isDayActive[lastEvaluatedDay - 1]) {
+                lastEvaluatedDay - 1
+            } else {
+                lastEvaluatedDay
+            }
+            for (day in startDay downTo 1) {
+                if (isDayActive[day]) currentStreak++ else break
+            }
+        }
+
+        return MonthlyStreakStats(
+            currentStreak = currentStreak,
+            longestStreak = longestStreak,
+            activeDays = activeDays,
+            missedDays = missedDays
+        )
+    }
+
+    private fun calculateTimeDistributionHeight(goalsCount: Int): Float {
+        val tableHeight = (goalsCount * 16.5f) + 24f
+        val donutCenterYOffset = 34f + maxOf(43f, tableHeight / 2f)
+        val upperEndYOffset = maxOf(donutCenterYOffset + 43f, 34f + tableHeight)
+        val midDividerYOffset = upperEndYOffset + 12f
+        val statsStartYOffset = midDividerYOffset + 12f
+        val cardHeight = statsStartYOffset + 38f
+        return cardHeight + 16f
+    }
+
+    private fun drawTimeDistributionSection(
+        canvas: Canvas,
+        startY: Float,
+        yearMonth: YearMonth,
+        overallProgress: MonthlyOverallProgress,
+        records: List<TimeGoalRecord>
+    ): Float {
+        val sortedGoals = overallProgress.goalProgressList.sortedByDescending { it.recordedMinutes }
+        val totalRecordedMinutes = overallProgress.totalRecordedMinutes
+
+        // Layout measurements
+        val tableHeight = (sortedGoals.size * 16.5f) + 24f
+        val donutCenterYOffset = 34f + maxOf(43f, tableHeight / 2f)
+        val donutCenterX = MARGIN_LEFT + 75f
+        val donutCenterY = startY + donutCenterYOffset
+
+        val upperEndYOffset = maxOf(donutCenterYOffset + 43f, 34f + tableHeight)
+        val midDividerY = startY + upperEndYOffset + 12f
+        val statsStartY = midDividerY + 12f
+        val cardHeight = statsStartY + 38f - startY
+
+        val cardRect = RectF(MARGIN_LEFT, startY, MARGIN_LEFT + CONTENT_WIDTH, startY + cardHeight)
+
+        // Card background & border
+        val bgPaint = Paint().apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        canvas.drawRoundRect(cardRect, 8f, 8f, bgPaint)
+
+        val borderPaint = Paint().apply {
+            color = COLOR_BORDER
+            strokeWidth = 0.75f
+            style = Paint.Style.STROKE
+            isAntiAlias = true
+        }
+        canvas.drawRoundRect(cardRect, 8f, 8f, borderPaint)
+
+        // Section Title: "TIME DISTRIBUTION"
+        val headingPaint = Paint().apply {
+            color = COLOR_PRIMARY
+            textSize = 9f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            letterSpacing = 0.12f
+            isAntiAlias = true
+        }
+        canvas.drawText("TIME DISTRIBUTION", MARGIN_LEFT + 14f, startY + 18f, headingPaint)
+
+        // 1. Donut Chart (Left)
+        val midR = 34f
+        val strokeW = 16f
+        val oval = RectF(
+            donutCenterX - midR,
+            donutCenterY - midR,
+            donutCenterX + midR,
+            donutCenterY + midR
+        )
+
+        val arcPaint = Paint().apply {
+            style = Paint.Style.STROKE
+            strokeWidth = strokeW
+            isAntiAlias = true
+        }
+
+        if (totalRecordedMinutes > 0) {
+            var currentAngle = -90f
+            for (gp in sortedGoals) {
+                if (gp.recordedMinutes <= 0) continue
+                val sweepAngle = (gp.recordedMinutes.toFloat() / totalRecordedMinutes.toFloat()) * 360f
+                val goalColor = try {
+                    android.graphics.Color.parseColor(gp.goal.colorHex)
+                } catch (_: Exception) {
+                    COLOR_PRIMARY
+                }
+                arcPaint.color = goalColor
+                canvas.drawArc(oval, currentAngle, sweepAngle, false, arcPaint)
+                currentAngle += sweepAngle
+            }
+        } else {
+            arcPaint.color = COLOR_BORDER
+            canvas.drawArc(oval, -90f, 360f, false, arcPaint)
+        }
+
+        // Donut Center Text: Total hours & label
+        val centerHoursPaint = Paint().apply {
+            color = COLOR_TEXT_PRIMARY
+            textSize = 13.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+        }
+        val centerLabelPaint = Paint().apply {
+            color = COLOR_TEXT_MUTED
+            textSize = 7f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+        }
+        val totalHoursStr = TimeGoalCalculations.formatHoursTotal(totalRecordedMinutes)
+        canvas.drawText(totalHoursStr, donutCenterX, donutCenterY - 1f, centerHoursPaint)
+        canvas.drawText("Total Invested", donutCenterX, donutCenterY + 11f, centerLabelPaint)
+
+        // 2. Pursuit Breakdown List (Right)
+        val legendStartX = MARGIN_LEFT + 155f
+        val pctColX = MARGIN_LEFT + CONTENT_WIDTH - 14f
+        val hoursColX = pctColX - 52f
+
+        val namePaint = Paint().apply {
+            color = COLOR_TEXT_PRIMARY
+            textSize = 8.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+            isAntiAlias = true
+        }
+        val hoursPaint = Paint().apply {
+            color = COLOR_TEXT_SECONDARY
+            textSize = 8.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+            textAlign = Paint.Align.RIGHT
+            isAntiAlias = true
+        }
+        val pctPaint = Paint().apply {
+            color = COLOR_TEXT_PRIMARY
+            textSize = 8.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textAlign = Paint.Align.RIGHT
+            isAntiAlias = true
+        }
+        val indicatorPaint = Paint().apply {
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+
+        var rowY = startY + 36f
+        val rowHeight = 16.5f
+
+        for (gp in sortedGoals) {
+            val goalColor = try {
+                android.graphics.Color.parseColor(gp.goal.colorHex)
+            } catch (_: Exception) {
+                COLOR_PRIMARY
+            }
+            indicatorPaint.color = goalColor
+            canvas.drawRoundRect(
+                RectF(legendStartX, rowY - 6.5f, legendStartX + 7.5f, rowY + 1f),
+                1.5f,
+                1.5f,
+                indicatorPaint
+            )
+
+            canvas.drawText(gp.goal.name, legendStartX + 14f, rowY, namePaint)
+
+            val hStr = TimeGoalCalculations.formatHoursTotal(gp.recordedMinutes)
+            canvas.drawText(hStr, hoursColX, rowY, hoursPaint)
+
+            val pct = if (totalRecordedMinutes > 0) {
+                (gp.recordedMinutes.toDouble() / totalRecordedMinutes.toDouble()) * 100.0
+            } else {
+                0.0
+            }
+            val pctStr = String.format(Locale.US, "%.1f%%", pct)
+            canvas.drawText(pctStr, pctColX, rowY, pctPaint)
+
+            rowY += rowHeight
+        }
+
+        // Subtle divider before Total
+        val rulePaint = Paint().apply {
+            color = COLOR_BORDER
+            strokeWidth = 0.5f
+            style = Paint.Style.STROKE
+            isAntiAlias = true
+        }
+        canvas.drawLine(legendStartX, rowY - 3f, pctColX, rowY - 3f, rulePaint)
+        rowY += 10f
+
+        // Total Row
+        val totalLabelPaint = Paint().apply {
+            color = COLOR_TEXT_PRIMARY
+            textSize = 8.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            isAntiAlias = true
+        }
+        val totalHoursPaint = Paint().apply {
+            color = COLOR_TEXT_PRIMARY
+            textSize = 8.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textAlign = Paint.Align.RIGHT
+            isAntiAlias = true
+        }
+        canvas.drawText("Total", legendStartX, rowY, totalLabelPaint)
+        canvas.drawText(totalHoursStr, hoursColX, rowY, totalHoursPaint)
+        val totalPctStr = if (totalRecordedMinutes > 0) "100%" else "0%"
+        canvas.drawText(totalPctStr, pctColX, rowY, pctPaint)
+
+        // 3. Horizontal divider between upper section and four stats
+        canvas.drawLine(
+            MARGIN_LEFT + 14f,
+            midDividerY,
+            MARGIN_LEFT + CONTENT_WIDTH - 14f,
+            midDividerY,
+            rulePaint
+        )
+
+        // 4. Four Statistics (Current Streak, Longest Streak, Active Days, Missed Days)
+        val streakStats = calculateMonthlyStreakStats(yearMonth, records)
+
+        val statLabelPaint = Paint().apply {
+            color = COLOR_TEXT_MUTED
+            textSize = 7.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            letterSpacing = 0.08f
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+        }
+
+        val statValuePaint = Paint().apply {
+            color = COLOR_TEXT_PRIMARY
+            textSize = 14f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+        }
+
+        val stats = listOf(
+            "CURRENT STREAK" to "${streakStats.currentStreak} ${if (streakStats.currentStreak == 1) "day" else "days"}",
+            "LONGEST STREAK" to "${streakStats.longestStreak} ${if (streakStats.longestStreak == 1) "day" else "days"}",
+            "ACTIVE DAYS" to "${streakStats.activeDays} ${if (streakStats.activeDays == 1) "day" else "days"}",
+            "MISSED DAYS" to "${streakStats.missedDays} ${if (streakStats.missedDays == 1) "day" else "days"}"
+        )
+
+        val colWidth = CONTENT_WIDTH / 4f
+        for ((i, stat) in stats.withIndex()) {
+            val cx = MARGIN_LEFT + (i * colWidth) + (colWidth / 2f)
+            canvas.drawText(stat.first, cx, statsStartY + 8f, statLabelPaint)
+            canvas.drawText(stat.second, cx, statsStartY + 25f, statValuePaint)
+
+            if (i > 0) {
+                val vx = MARGIN_LEFT + (i * colWidth)
+                canvas.drawLine(vx, statsStartY + 2f, vx, statsStartY + 28f, rulePaint)
+            }
+        }
+
+        return startY + cardHeight + 16f
     }
 
     private fun drawInsightsSection(
