@@ -91,6 +91,8 @@ class NudgeRepository(
 
     suspend fun getAllTasksList(): List<NudgeTask> = nudgeTaskDao.getAllTasksList()
 
+    suspend fun getTaskById(taskId: Long): NudgeTask? = nudgeTaskDao.getTaskById(taskId)
+
     suspend fun getDeletedTasksList(): List<NudgeTask> = nudgeTaskDao.getDeletedTasksList()
 
     suspend fun getAllTasksIncludingDeletedList(): List<NudgeTask> = nudgeTaskDao.getAllTasksIncludingDeletedList()

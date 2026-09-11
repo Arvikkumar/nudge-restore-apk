@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.RingtoneManager
@@ -138,11 +139,25 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
-fun calculateTimeRemainingText(dateLabel: String, timeLabel: String, repeatRule: String? = null): String? {
+fun calculateTimeRemainingText(
+    dateLabel: String,
+    timeLabel: String,
+    repeatRule: String? = null,
+    task: NudgeTask? = null,
+    context: Context? = null
+): String? {
     if (timeLabel.isBlank() || timeLabel.equals("Any time", ignoreCase = true)) return null
 
     val now = System.currentTimeMillis()
-    val targetMillis = NudgeAlarmScheduler.calculateNextOccurrenceMillis(dateLabel, timeLabel, repeatRule, now)
+    val targetMillis = if (task != null &&
+        task.dateLabel.equals(dateLabel, ignoreCase = true) &&
+        task.timeLabel.equals(timeLabel, ignoreCase = true)
+    ) {
+        TaskOccurrenceResolver.resolveTargetOccurrenceMillis(task, context, now)
+    } else {
+        val baseRef = if (task != null && task.createdAt > 0L) task.createdAt else now
+        NudgeAlarmScheduler.calculateNextOccurrenceMillis(dateLabel, timeLabel, repeatRule, now, baseRef = baseRef)
+    }
 
     val diffMillis = targetMillis - now
     if (diffMillis <= 0) return null
@@ -2021,7 +2036,13 @@ fun ComposerSheet(
 
             // Custom time distance indicator
             if (selectedTimeOption == "custom" && customTimeText != null) {
-                val remainingText = calculateTimeRemainingText(selectedDate, customTimeText!!, selectedRepeat)
+                val remainingText = calculateTimeRemainingText(
+                    dateLabel = selectedDate,
+                    timeLabel = customTimeText!!,
+                    repeatRule = selectedRepeat,
+                    task = existingTask,
+                    context = context
+                )
                 if (!remainingText.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(

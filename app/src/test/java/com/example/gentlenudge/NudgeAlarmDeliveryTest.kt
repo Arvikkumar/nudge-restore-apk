@@ -12,6 +12,7 @@ import com.example.gentlenudge.notification.NudgeNotificationReceiver
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -532,16 +533,16 @@ class NudgeAlarmDeliveryTest {
             notifications.any { it.extras.getString(android.app.Notification.EXTRA_TEXT) == "Test 2 One Time Reminder" }
         )
 
-        // Verify task in DB marked completed
+        // Verify task in DB remains pending (Fix #2: do NOT auto-complete upon delivery)
         val updatedTask = dao.getTaskById(task.id)
         assertNotNull(updatedTask)
-        assertTrue("Task must be marked isDone = true upon delivery", updatedTask!!.isDone)
-        assertNotNull("completedAt must be populated upon delivery", updatedTask.completedAt)
+        assertFalse("Task must NOT be marked isDone = true upon delivery", updatedTask!!.isDone)
+        assertNull("completedAt must NOT be populated upon delivery", updatedTask.completedAt)
 
-        // Subsequent schedule call must be a no-op
+        // Subsequent schedule call must still be a no-op because occurrence was delivered and is in past
         val initialAlarmCount = shadowAlarmManager.scheduledAlarms.size
         NudgeAlarmScheduler.scheduleTask(context, updatedTask)
-        assertEquals("No new alarm must be scheduled for completed task", initialAlarmCount, shadowAlarmManager.scheduledAlarms.size)
+        assertEquals("No new alarm must be scheduled for already delivered past occurrence", initialAlarmCount, shadowAlarmManager.scheduledAlarms.size)
 
         dao.deleteTaskById(task.id)
     }
@@ -750,5 +751,110 @@ class NudgeAlarmDeliveryTest {
         }
         val triggerAfterMidnight = NudgeAlarmScheduler.getScheduledTriggerMillis(context, task, calToday1am.timeInMillis)
         assertEquals("Meaning must not shift after midnight", calToday10am.timeInMillis, triggerAfterMidnight)
+    }
+
+    @Test
+    fun test9_SnoozeAfterNotificationFiresSchedulesNewAlarm() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<com.example.gentlenudge.GentleNudgeApp>()
+        val dao = app.database.nudgeTaskDao()
+
+        val task = NudgeTask(
+            id = 509L,
+            title = "Test 9 Snooze",
+            dateLabel = "Today",
+            timeLabel = "5:00 AM",
+            repeat = "Does not repeat",
+            isDone = false,
+            createdAt = System.currentTimeMillis() - 3600000L
+        )
+        dao.insertTask(task)
+
+        // Simulate firing notification
+        val receiver = NudgeNotificationReceiver()
+        val fireIntent = Intent(context, NudgeNotificationReceiver::class.java).apply {
+            action = NudgeNotificationHelper.ACTION_FIRE_NUDGE
+            putExtra(NudgeNotificationHelper.EXTRA_TASK_ID, task.id)
+            putExtra(NudgeNotificationHelper.EXTRA_TASK_TITLE, task.title)
+        }
+        receiver.onReceive(context, fireIntent)
+        kotlinx.coroutines.delay(300)
+
+        // Task must remain pending after firing
+        val pendingTask = dao.getTaskById(task.id)
+        assertNotNull(pendingTask)
+        assertFalse("Task must not be done", pendingTask!!.isDone)
+
+        // Now user taps Snooze
+        val snoozeIntent = Intent(context, NudgeNotificationReceiver::class.java).apply {
+            action = NudgeNotificationHelper.ACTION_SNOOZE_NUDGE
+            putExtra(NudgeNotificationHelper.EXTRA_TASK_ID, task.id)
+        }
+        receiver.onReceive(context, snoozeIntent)
+        kotlinx.coroutines.delay(300)
+
+        // Verify task updated with new snooze time, still pending
+        val snoozedTask = dao.getTaskById(task.id)
+        assertNotNull(snoozedTask)
+        assertFalse("Snoozed task must not be done", snoozedTask!!.isDone)
+        assertEquals("Snoozed task section must be today", "today", snoozedTask.section)
+
+        // Verify alarm is scheduled in the future for snoozed task
+        val snoozedAlarm = shadowAlarmManager.scheduledAlarms.find {
+            val op = it.operation
+            val shadowOp = Shadows.shadowOf(op)
+            shadowOp.savedIntent.getLongExtra(NudgeNotificationHelper.EXTRA_TASK_ID, -1L) == task.id
+        }
+        assertNotNull("Alarm must be scheduled for snoozed task", snoozedAlarm)
+        assertTrue("Snoozed alarm must be in the future", snoozedAlarm!!.triggerAtTime > System.currentTimeMillis())
+
+        dao.deleteTaskById(task.id)
+    }
+
+    @Test
+    fun test10_EditingTitleAfterMidnightDoesNotShiftIntendedOccurrence() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<com.example.gentlenudge.GentleNudgeApp>()
+        val dao = app.database.nudgeTaskDao()
+
+        val calYesterday = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, -1)
+            set(Calendar.HOUR_OF_DAY, 20)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val calToday10am = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 10)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        val originalTask = NudgeTask(
+            id = 510L,
+            title = "Original Title",
+            dateLabel = "Tomorrow",
+            timeLabel = "10:00 AM",
+            repeat = "Does not repeat",
+            isDone = false,
+            createdAt = calYesterday.timeInMillis
+        )
+        dao.insertTask(originalTask)
+        NudgeAlarmScheduler.saveScheduledTriggerMillis(context, originalTask.id, calToday10am.timeInMillis)
+
+        // Today after midnight, user edits only the title:
+        val editedTask = originalTask.copy(title = "Updated Title Only")
+        dao.updateTask(editedTask)
+
+        // When scheduleTask is called with forceRecalculate = false (as NudgeViewModel does when schedule info hasn't changed):
+        NudgeAlarmScheduler.scheduleTask(context, editedTask, forceRecalculate = false)
+
+        val triggerAfterEdit = NudgeAlarmScheduler.getScheduledTriggerMillis(context, editedTask)
+        assertEquals("Scheduled occurrence must remain Today at 10:00 AM after title edit", calToday10am.timeInMillis, triggerAfterEdit)
+
+        // TaskOccurrenceResolver must also resolve to today at 10:00 AM
+        val resolvedOccurrence = com.example.gentlenudge.ui.components.TaskOccurrenceResolver.resolveTargetOccurrenceMillis(editedTask, context)
+        assertEquals("TaskOccurrenceResolver must preserve Today 10:00 AM", calToday10am.timeInMillis, resolvedOccurrence)
+
+        dao.deleteTaskById(originalTask.id)
     }
 }

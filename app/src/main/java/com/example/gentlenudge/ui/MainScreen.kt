@@ -135,6 +135,20 @@ fun MainScreen(
     val monthColorsMap by viewModel.monthColorsMap.collectAsStateWithLifecycle()
     val deletedTasks by viewModel.deletedTasks.collectAsStateWithLifecycle()
     val deletedTasksCount by viewModel.deletedTasksCount.collectAsStateWithLifecycle()
+    val currentDateMillis by viewModel.currentDateMillis.collectAsStateWithLifecycle()
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshDateBoundary()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     // Backup & Data Safety state
     val lastBackupTimestamp by viewModel.lastBackupTimestamp.collectAsStateWithLifecycle()
@@ -458,6 +472,7 @@ fun MainScreen(
                         allTimeGoals = allTimeGoals,
                         allTimeGoalRecords = allTimeGoalRecords,
                         monthColorsMap = monthColorsMap,
+                        currentDateMillis = currentDateMillis,
                         onToggleDone = { viewModel.toggleDone(it) },
                         onSnooze = { task, label -> viewModel.snoozeTask(task, label) },
                         onDelete = { viewModel.deleteTask(it) },

@@ -78,13 +78,9 @@ class BootReceiver : BroadcastReceiver() {
                                 } else {
                                     Log.d("BootReceiver", "One-time task ${task.id} occurrence $occurrenceKey already delivered. Skipping.")
                                 }
-                                // Mark the one-time task completed/expired so it is not active or rescheduled
-                                val completedTask = task.copy(
-                                    isDone = true,
-                                    completedAt = if (task.completedAt != null) task.completedAt else now
-                                )
-                                app.database.nudgeTaskDao().updateTask(completedTask)
-                                // Do NOT reschedule for the next day, and do NOT convert to recurring
+                                // Do NOT automatically mark one-time task as completed/done.
+                                // It remains an active/pending (or overdue) reminder.
+                                // Do NOT reschedule for the next day, and do NOT convert to recurring.
                             } else {
                                 // Scheduled time is in the future: restore the exact same persisted trigger
                                 if (notificationsEnabled) {

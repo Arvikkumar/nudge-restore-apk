@@ -121,12 +121,10 @@ class NudgeNotificationReceiver : BroadcastReceiver() {
                                     NudgeAlarmScheduler.scheduleTask(context, nextTask, forceRecalculate = false)
                                 }
                             } else {
-                                // Mark non-repeating task completed/expired immediately upon notification delivery
-                                val completedTask = taskToNotify.copy(
-                                    isDone = true,
-                                    completedAt = System.currentTimeMillis()
-                                )
-                                dao.updateTask(completedTask)
+                                // One-time task: The reminder notification has been delivered.
+                                // Do NOT automatically mark that task as Done (isDone = true).
+                                // The task remains an active/pending (or overdue) reminder until
+                                // the user explicitly marks it done.
                             }
                         }
                     }
@@ -146,12 +144,17 @@ class NudgeNotificationReceiver : BroadcastReceiver() {
                         val task = dao.getTaskById(taskId)
                         if (task != null) {
                             val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
-                            val snoozedTime = timeFormat.format(Date(System.currentTimeMillis() + (30 * 60 * 1000L)))
+                            val snoozedMillis = System.currentTimeMillis() + (30 * 60 * 1000L)
+                            val snoozedTime = timeFormat.format(Date(snoozedMillis))
                             val updatedTask = task.copy(
                                 timeLabel = snoozedTime,
-                                section = "today"
+                                dateLabel = "Today",
+                                section = "today",
+                                isDone = false,
+                                completedAt = null
                             )
                             dao.updateTask(updatedTask)
+                            NudgeAlarmScheduler.saveScheduledTriggerMillis(context, updatedTask.id, snoozedMillis)
                             NudgeAlarmScheduler.scheduleTask(context, updatedTask, forceRecalculate = true)
                             NudgeNotificationHelper.dismissNotification(context, taskId)
                         }
@@ -257,13 +260,9 @@ class NudgeNotificationReceiver : BroadcastReceiver() {
 
         fun formatOccurrenceDateLabel(targetCal: Calendar): String {
             val todayCal = Calendar.getInstance()
-            val tomorrowCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
 
             if (isSameDay(targetCal, todayCal)) {
                 return "Today"
-            }
-            if (isSameDay(targetCal, tomorrowCal)) {
-                return "Tomorrow"
             }
 
             val currentYear = todayCal.get(Calendar.YEAR)

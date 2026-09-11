@@ -29,9 +29,13 @@ import com.example.gentlenudge.nlp.NudgeNlpParser
 import com.example.gentlenudge.nlp.ParsedNudge
 import com.example.gentlenudge.notification.NudgeAlarmScheduler
 import com.example.gentlenudge.notification.NudgeEventNotificationScheduler
+import com.example.gentlenudge.ui.components.TaskOccurrenceResolver
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +44,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -60,6 +65,15 @@ class NudgeViewModel(
 
     private val prefs = application.getSharedPreferences("gentle_nudge_prefs", Context.MODE_PRIVATE)
 
+    private val _dateTick = MutableStateFlow(System.currentTimeMillis())
+    val currentDateMillis: StateFlow<Long> = _dateTick.asStateFlow()
+
+    private val dateChangeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            _dateTick.value = System.currentTimeMillis()
+        }
+    }
+
     val allTasks: StateFlow<List<NudgeTask>> = repository.allTasks
         .stateIn(
             scope = viewModelScope,
@@ -67,19 +81,29 @@ class NudgeViewModel(
             initialValue = emptyList()
         )
 
-    val todayTasks: StateFlow<List<NudgeTask>> = repository.todayTasks
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val todayTasks: StateFlow<List<NudgeTask>> = combine(allTasks, _dateTick) { tasks, now ->
+        val pending = tasks.filter { !it.isDone && !it.isDeleted }
+        pending.filter { task ->
+            val occurrence = TaskOccurrenceResolver.resolveTargetOccurrenceMillis(task, application, now)
+            TaskOccurrenceResolver.isOccurrenceTodayOrPast(occurrence, now)
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
-    val laterTasks: StateFlow<List<NudgeTask>> = repository.laterTasks
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val laterTasks: StateFlow<List<NudgeTask>> = combine(allTasks, _dateTick) { tasks, now ->
+        val pending = tasks.filter { !it.isDone && !it.isDeleted }
+        pending.filter { task ->
+            val occurrence = TaskOccurrenceResolver.resolveTargetOccurrenceMillis(task, application, now)
+            !TaskOccurrenceResolver.isOccurrenceTodayOrPast(occurrence, now)
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     val completedTasks: StateFlow<List<NudgeTask>> = repository.completedTasks
         .stateIn(
@@ -248,6 +272,25 @@ class NudgeViewModel(
     )
 
     init {
+        val dateFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_DATE_CHANGED)
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        }
+        try {
+            application.registerReceiver(dateChangeReceiver, dateFilter)
+        } catch (_: Exception) {}
+
+        viewModelScope.launch {
+            while (isActive) {
+                val now = System.currentTimeMillis()
+                val nextMidnight = TaskOccurrenceResolver.getNextMidnightMillis(now)
+                val delayMs = maxOf(500L, nextMidnight - now + 200L)
+                delay(delayMs)
+                _dateTick.value = System.currentTimeMillis()
+            }
+        }
+
         // Schedule all active pending tasks initially and cleanup expired deleted items (>30 days)
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -563,6 +606,10 @@ class NudgeViewModel(
         val newIsDone = if (wasDoneAndNowRepeating) false else task.isDone
         val newCompletedAt = if (!newIsDone) null else task.completedAt
 
+        val scheduleChanged = (dateLabel != task.dateLabel || finalTime != task.timeLabel || repeat != task.repeat)
+        val dateChanged = (dateLabel != task.dateLabel)
+        val newCreatedAt = if (dateChanged) System.currentTimeMillis() else task.createdAt
+
         val updated = task.copy(
             title = trimmed,
             dateLabel = dateLabel,
@@ -576,13 +623,14 @@ class NudgeViewModel(
             attachmentsJson = attachmentsJson,
             isDone = newIsDone,
             completedAt = newCompletedAt,
-            section = section
+            section = section,
+            createdAt = newCreatedAt
         )
 
         viewModelScope.launch {
             repository.update(updated)
             if (_notificationsEnabled.value && !updated.isDone) {
-                NudgeAlarmScheduler.scheduleTask(getApplication(), updated, forceRecalculate = true)
+                NudgeAlarmScheduler.scheduleTask(getApplication(), updated, forceRecalculate = scheduleChanged)
             } else if (updated.isDone) {
                 NudgeAlarmScheduler.cancelTask(getApplication(), updated.id)
             }
@@ -597,16 +645,26 @@ class NudgeViewModel(
         val wasDoneAndNowRepeating = task.isDone && isRepeatingOption
         val newIsDone = if (wasDoneAndNowRepeating) false else task.isDone
         val newCompletedAt = if (!newIsDone) null else task.completedAt
-        val updated = task.copy(
-            isDone = newIsDone,
-            completedAt = newCompletedAt,
-            section = section
-        )
 
         viewModelScope.launch {
+            val existing = repository.getTaskById(task.id)
+            val scheduleChanged = existing == null ||
+                existing.dateLabel != task.dateLabel ||
+                existing.timeLabel != task.timeLabel ||
+                existing.repeat != task.repeat
+            val dateChanged = existing != null && existing.dateLabel != task.dateLabel
+            val newCreatedAt = if (dateChanged) System.currentTimeMillis() else (existing?.createdAt ?: task.createdAt)
+
+            val updated = task.copy(
+                isDone = newIsDone,
+                completedAt = newCompletedAt,
+                section = section,
+                createdAt = newCreatedAt
+            )
+
             repository.update(updated)
             if (_notificationsEnabled.value && !updated.isDone) {
-                NudgeAlarmScheduler.scheduleTask(getApplication(), updated, forceRecalculate = true)
+                NudgeAlarmScheduler.scheduleTask(getApplication(), updated, forceRecalculate = scheduleChanged)
             } else if (updated.isDone) {
                 NudgeAlarmScheduler.cancelTask(getApplication(), updated.id)
             }
@@ -635,7 +693,9 @@ class NudgeViewModel(
             val updated = task.copy(
                 timeLabel = newTimeLabel,
                 dateLabel = newDateLabel,
-                section = if (newDateLabel == "Today" || newDateLabel == "Tonight") "today" else "later"
+                section = if (newDateLabel == "Today" || newDateLabel == "Tonight") "today" else "later",
+                isDone = false,
+                completedAt = null
             )
             repository.update(updated)
             if (_notificationsEnabled.value) {
@@ -1348,6 +1408,20 @@ class NudgeViewModel(
                 showToast("Could not generate multi-month report: ${e.localizedMessage}")
             }
         }
+    }
+
+    fun refreshDateBoundary() {
+        val now = System.currentTimeMillis()
+        if (!TaskOccurrenceResolver.isSameDay(_dateTick.value, now)) {
+            _dateTick.value = now
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            getApplication<Application>().unregisterReceiver(dateChangeReceiver)
+        } catch (_: Exception) {}
     }
 }
 

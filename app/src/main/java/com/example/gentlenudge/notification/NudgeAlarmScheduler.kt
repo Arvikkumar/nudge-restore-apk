@@ -116,8 +116,14 @@ object NudgeAlarmScheduler {
      *     - If non-repeating, returns the base trigger without rolling over to tomorrow.
      *     - Never falls back to now + 2000L for fixed clock times.
      */
-    fun calculateNextOccurrenceMillis(dateLabel: String, timeLabel: String, repeatRule: String? = null, now: Long = System.currentTimeMillis()): Long {
-        val baseTrigger = calculateTriggerMillis(dateLabel, timeLabel, now)
+    fun calculateNextOccurrenceMillis(
+        dateLabel: String,
+        timeLabel: String,
+        repeatRule: String? = null,
+        now: Long = System.currentTimeMillis(),
+        baseRef: Long = now
+    ): Long {
+        val baseTrigger = calculateTriggerMillis(dateLabel, timeLabel, baseRef)
         if (isRelativeTimePhrase(timeLabel)) {
             return baseTrigger
         }

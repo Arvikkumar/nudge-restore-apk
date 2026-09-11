@@ -68,6 +68,7 @@ fun DateStrip(
     datesWithTasks: Set<String> = emptySet(), // formatted "yyyy-MM-dd"
     onEventDateSelected: ((events: List<NudgeCalendarEvent>, date: Calendar) -> Unit)? = null,
     onOpenDayOverview: ((date: Calendar) -> Unit)? = null,
+    currentDateMillis: Long = System.currentTimeMillis(),
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -77,8 +78,9 @@ fun DateStrip(
     val monthYearFormat = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
 
     // Generate date sequence: 14 days before today up to 45 days after today (total 60 days)
-    val todayCal = remember {
+    val todayCal = remember(currentDateMillis) {
         Calendar.getInstance().apply {
+            timeInMillis = currentDateMillis
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
@@ -89,7 +91,7 @@ fun DateStrip(
     val pastDays = 14
     val futureDays = 45
 
-    val dateList = remember {
+    val dateList = remember(todayCal.timeInMillis) {
         val list = mutableListOf<StripDate>()
         val cal = Calendar.getInstance().apply {
             timeInMillis = todayCal.timeInMillis
@@ -123,8 +125,8 @@ fun DateStrip(
 
     val todayIndex = pastDays
 
-    // Scroll to today's date on initial composition
-    LaunchedEffect(Unit) {
+    // Scroll to today's date on initial composition or when day rolls over
+    LaunchedEffect(todayCal.timeInMillis) {
         val targetIndex = (todayIndex - 2).coerceAtLeast(0)
         listState.scrollToItem(targetIndex)
     }

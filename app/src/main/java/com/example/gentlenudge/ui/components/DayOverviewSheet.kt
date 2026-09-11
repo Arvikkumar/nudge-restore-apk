@@ -1,5 +1,6 @@
 package com.example.gentlenudge.ui.components
 
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -223,7 +224,7 @@ fun DayOverviewSheet(
 
     // Filter tasks for this selected date
     val dateTasks = remember(selectedCal.timeInMillis, allTasks) {
-        allTasks.filter { task -> isTaskOnDateHelper(task, selectedCal) }
+        allTasks.filter { task -> isTaskOnDateHelper(task, selectedCal, context) }
     }
 
     // Differentiate user notes vs scheduled nudges/reminders
@@ -590,12 +591,13 @@ fun FullMonthCalendarView(
     val currentMonthCal by rememberUpdatedState(viewMonthCalendar)
     val currentOnMonthChange by rememberUpdatedState(onMonthChange)
     val density = LocalDensity.current
+    val context = LocalContext.current
     val swipeThresholdPx = with(density) { 40.dp.toPx() }
     var totalDragX by remember { mutableFloatStateOf(0f) }
 
     // Calculate grid matrix: 7 columns (Mon to Sun)
     val calendarDays = remember(currentYear, currentMonth, allTasks, allTimeGoals, allTimeGoalRecords, monthColorsMap) {
-        generateMonthDays(currentYear, currentMonth, allTasks, allTimeGoals, allTimeGoalRecords, monthColorsMap)
+        generateMonthDays(currentYear, currentMonth, allTasks, allTimeGoals, allTimeGoalRecords, monthColorsMap, context)
     }
 
     Card(
@@ -815,7 +817,8 @@ private fun generateMonthDays(
     allTasks: List<NudgeTask>,
     allTimeGoals: List<TimeGoal> = emptyList(),
     allTimeGoalRecords: List<TimeGoalRecord> = emptyList(),
-    monthColorsMap: Map<Pair<Long, String>, String> = emptyMap()
+    monthColorsMap: Map<Pair<Long, String>, String> = emptyMap(),
+    context: Context? = null
 ): List<MonthDayData> {
     val result = mutableListOf<MonthDayData>()
 
@@ -868,7 +871,7 @@ private fun generateMonthDays(
             set(Calendar.MONTH, month)
             set(Calendar.DAY_OF_MONTH, d)
         }
-        val dayTasks = allTasks.filter { isTaskOnDateHelper(it, checkCal) }
+        val dayTasks = allTasks.filter { isTaskOnDateHelper(it, checkCal, context) }
         val hasNotes = dayTasks.any { it.timeLabel.equals("Any time", ignoreCase = true) || it.timeLabel.isBlank() }
         val hasReminders = dayTasks.any { !it.timeLabel.equals("Any time", ignoreCase = true) && it.timeLabel.isNotBlank() }
 
@@ -1615,7 +1618,7 @@ fun QuietDayCard(
 /**
  * Standardized date matching helper for tasks.
  */
-fun isTaskOnDateHelper(task: NudgeTask, targetCal: Calendar): Boolean {
+fun isTaskOnDateHelper(task: NudgeTask, targetCal: Calendar, context: Context? = null): Boolean {
     val targetYear = targetCal.get(Calendar.YEAR)
     val targetMonth = targetCal.get(Calendar.MONTH)
     val targetDay = targetCal.get(Calendar.DAY_OF_MONTH)
@@ -1625,17 +1628,23 @@ fun isTaskOnDateHelper(task: NudgeTask, targetCal: Calendar): Boolean {
             targetMonth == todayCal.get(Calendar.MONTH) &&
             targetDay == todayCal.get(Calendar.DAY_OF_MONTH)
 
-    if (isTargetToday && (task.section == "today" || task.dateLabel.equals("Today", ignoreCase = true) || task.dateLabel.equals("Tonight", ignoreCase = true))) {
-        return true
+    // Authoritative occurrence resolution
+    val occurrenceMillis = TaskOccurrenceResolver.resolveTargetOccurrenceMillis(task, context)
+    if (occurrenceMillis > 0L) {
+        val occCal = Calendar.getInstance().apply { timeInMillis = occurrenceMillis }
+        if (occCal.get(Calendar.YEAR) == targetYear &&
+            occCal.get(Calendar.MONTH) == targetMonth &&
+            occCal.get(Calendar.DAY_OF_MONTH) == targetDay
+        ) {
+            return true
+        }
     }
 
-    val triggerMillis = NudgeAlarmScheduler.calculateTriggerMillis(task.dateLabel, task.timeLabel)
-    val taskCal = Calendar.getInstance().apply { timeInMillis = triggerMillis }
-    if (taskCal.get(Calendar.YEAR) == targetYear &&
-        taskCal.get(Calendar.MONTH) == targetMonth &&
-        taskCal.get(Calendar.DAY_OF_MONTH) == targetDay
-    ) {
-        return true
+    // Overdue or pending tasks scheduled for today or earlier belong in today's view
+    if (isTargetToday && !task.isDone && !task.isDeleted && occurrenceMillis > 0L) {
+        if (TaskOccurrenceResolver.isOccurrenceTodayOrPast(occurrenceMillis)) {
+            return true
+        }
     }
 
     val dateFormats = listOf(

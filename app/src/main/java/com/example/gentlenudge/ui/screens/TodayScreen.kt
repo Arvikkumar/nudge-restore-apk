@@ -57,6 +57,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import com.example.gentlenudge.data.events.NudgeCalendarEvent
 import com.example.gentlenudge.data.model.NudgeTask
@@ -66,6 +67,7 @@ import com.example.gentlenudge.notification.NudgeAlarmScheduler
 import com.example.gentlenudge.ui.components.CalendarEventSheet
 import com.example.gentlenudge.ui.components.DateStrip
 import com.example.gentlenudge.ui.components.DayOverviewSheet
+import com.example.gentlenudge.ui.components.TaskOccurrenceResolver
 import com.example.gentlenudge.ui.components.TaskSlipItem
 import com.example.gentlenudge.ui.components.isTaskOnDateHelper
 import com.example.gentlenudge.ui.theme.ImportantDot
@@ -96,6 +98,7 @@ fun TodayScreen(
     allTimeGoals: List<TimeGoal> = emptyList(),
     allTimeGoalRecords: List<TimeGoalRecord> = emptyList(),
     monthColorsMap: Map<Pair<Long, String>, String> = emptyMap(),
+    currentDateMillis: Long = System.currentTimeMillis(),
     onToggleDone: (NudgeTask) -> Unit,
     onSnooze: (NudgeTask, String) -> Unit,
     onDelete: (NudgeTask) -> Unit,
@@ -106,23 +109,28 @@ fun TodayScreen(
     isListening: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val dayFormat = remember { SimpleDateFormat("d", Locale.getDefault()) }
     val monthFormat = remember { SimpleDateFormat("MMM", Locale.getDefault()) }
-    val currentDate = remember { Date() }
-    val currentDay = dayFormat.format(currentDate)
-    val currentMonth = monthFormat.format(currentDate).uppercase()
+    val currentDate = remember(currentDateMillis) { Date(currentDateMillis) }
+    val currentDay = remember(currentDateMillis) { dayFormat.format(currentDate) }
+    val currentMonth = remember(currentDateMillis) { monthFormat.format(currentDate).uppercase() }
 
-    var selectedCalendar by remember { mutableStateOf(Calendar.getInstance()) }
+    var selectedCalendar by remember(currentDateMillis) {
+        mutableStateOf(Calendar.getInstance().apply { timeInMillis = currentDateMillis })
+    }
     var showDayOverviewCalendar by remember { mutableStateOf<Calendar?>(null) }
 
-    val todayCal = remember { Calendar.getInstance() }
+    val todayCal = remember(currentDateMillis) {
+        Calendar.getInstance().apply { timeInMillis = currentDateMillis }
+    }
 
     // Build dates with active tasks to show subtle dots
-    val datesWithTasks = remember(allTasks) {
+    val datesWithTasks = remember(allTasks, currentDateMillis) {
         val set = mutableSetOf<String>()
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         allTasks.filter { !it.isDone }.forEach { task ->
-            val trigger = NudgeAlarmScheduler.calculateTriggerMillis(task.dateLabel, task.timeLabel)
+            val trigger = TaskOccurrenceResolver.resolveTargetOccurrenceMillis(task, context, currentDateMillis)
             val cal = Calendar.getInstance().apply { timeInMillis = trigger }
             set.add(sdf.format(cal.time))
         }
@@ -245,6 +253,7 @@ fun TodayScreen(
         item {
             DateStrip(
                 selectedCalendar = selectedCalendar,
+                currentDateMillis = currentDateMillis,
                 onDateSelected = { newCal ->
                     selectedCalendar = newCal
                     showDayOverviewCalendar = newCal
@@ -403,57 +412,7 @@ fun TodayScreen(
 }
 
 private fun isTaskOnDate(task: NudgeTask, targetCal: Calendar): Boolean {
-    val targetYear = targetCal.get(Calendar.YEAR)
-    val targetMonth = targetCal.get(Calendar.MONTH)
-    val targetDay = targetCal.get(Calendar.DAY_OF_MONTH)
-
-    val todayCal = Calendar.getInstance()
-    val isTargetToday = targetYear == todayCal.get(Calendar.YEAR) &&
-            targetMonth == todayCal.get(Calendar.MONTH) &&
-            targetDay == todayCal.get(Calendar.DAY_OF_MONTH)
-
-    if (isTargetToday && (task.section == "today" || task.dateLabel.equals("Today", ignoreCase = true) || task.dateLabel.equals("Tonight", ignoreCase = true))) {
-        return true
-    }
-
-    val triggerMillis = NudgeAlarmScheduler.calculateTriggerMillis(task.dateLabel, task.timeLabel)
-    val taskCal = Calendar.getInstance().apply { timeInMillis = triggerMillis }
-    if (taskCal.get(Calendar.YEAR) == targetYear &&
-        taskCal.get(Calendar.MONTH) == targetMonth &&
-        taskCal.get(Calendar.DAY_OF_MONTH) == targetDay
-    ) {
-        return true
-    }
-
-    val dateFormats = listOf(
-        SimpleDateFormat("MMM d, yyyy", Locale.getDefault()),
-        SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()),
-        SimpleDateFormat("MMM d", Locale.getDefault()),
-        SimpleDateFormat("MMMM d", Locale.getDefault()),
-        SimpleDateFormat("d MMM yyyy", Locale.getDefault()),
-        SimpleDateFormat("d MMMM yyyy", Locale.getDefault()),
-        SimpleDateFormat("d MMM", Locale.getDefault()),
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()),
-        SimpleDateFormat("MMM d, yyyy", Locale.US),
-        SimpleDateFormat("MMM d", Locale.US)
-    )
-    for (fmt in dateFormats) {
-        try {
-            val parsed = fmt.parse(task.dateLabel.trim())
-            if (parsed != null) {
-                val parsedCal = Calendar.getInstance().apply { time = parsed }
-                val matchesYear = !task.dateLabel.contains(Regex("\\b20\\d{2}\\b")) || (parsedCal.get(Calendar.YEAR) == targetYear)
-                if (matchesYear &&
-                    parsedCal.get(Calendar.MONTH) == targetMonth &&
-                    parsedCal.get(Calendar.DAY_OF_MONTH) == targetDay
-                ) {
-                    return true
-                }
-            }
-        } catch (_: Exception) {}
-    }
-
-    return false
+    return isTaskOnDateHelper(task, targetCal)
 }
 
 @Composable
