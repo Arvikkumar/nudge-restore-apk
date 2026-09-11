@@ -499,4 +499,33 @@ class TimeGoalsPdfExporterTest {
             sequenceCross
         )
     }
+
+    @Test
+    fun `test generatePdf with includeTimeDistribution enabled and disabled`() {
+        val aug2026 = YearMonth.of(2026, 8)
+        
+        // Enabled (default)
+        val optionsEnabled = TimeGoalsPdfOptions(includeTimeDistribution = true)
+        val fileEnabled = TimeGoalsPdfExporter.generatePdf(
+            context = context,
+            yearMonth = aug2026,
+            goals = sampleGoals,
+            records = sampleRecords,
+            options = optionsEnabled
+        )
+        assertNotNull(fileEnabled)
+        assertTrue(fileEnabled.exists())
+
+        // Disabled
+        val optionsDisabled = TimeGoalsPdfOptions(includeTimeDistribution = false)
+        val fileDisabled = TimeGoalsPdfExporter.generatePdf(
+            context = context,
+            yearMonth = aug2026,
+            goals = sampleGoals,
+            records = sampleRecords,
+            options = optionsDisabled
+        )
+        assertNotNull(fileDisabled)
+        assertTrue(fileDisabled.exists())
+    }
 }

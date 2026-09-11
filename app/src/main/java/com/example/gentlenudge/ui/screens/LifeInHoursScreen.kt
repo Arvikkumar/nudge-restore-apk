@@ -2802,6 +2802,7 @@ private fun ExportPdfView(
     var includeGoalsList by remember { mutableStateOf(true) }
     var includeCalendarGrid by remember { mutableStateOf(true) }
     var includeDailyRecords by remember { mutableStateOf(true) }
+    var includeTimeDistribution by remember { mutableStateOf(true) }
     var includeInsights by remember { mutableStateOf(true) }
 
     val monthTitle = TimeGoalCalculations.formatYearMonth(selectedYearMonth)
@@ -3217,53 +3218,68 @@ private fun ExportPdfView(
                             // Document Sections To Include
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(20.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                                    containerColor = MaterialTheme.colorScheme.surface
                                 ),
-                                border = CardDefaults.outlinedCardBorder().copy(
+                                border = BorderStroke(
                                     width = 1.dp,
-                                    brush = Brush.linearGradient(listOf(PaperBorderLight, PaperBorderLight))
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                ),
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = 0.5.dp
                                 )
                             ) {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        .padding(24.dp)
                                 ) {
                                     Text(
                                         text = "DOCUMENT SECTIONS TO INCLUDE",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontWeight = FontWeight.Bold,
                                             letterSpacing = 1.sp,
-                                            fontSize = 10.5.sp
+                                            fontSize = 11.sp
                                         ),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
 
+                                    Spacer(modifier = Modifier.height(10.dp))
+
                                     ExportOptionRow(
-                                        label = "Monthly Summary Overview Card",
+                                        label = "Monthly Hours Summary",
                                         checked = includeSummary,
-                                        onCheckedChange = { includeSummary = it }
+                                        onCheckedChange = { includeSummary = it },
+                                        showDivider = true
                                     )
 
                                     ExportOptionRow(
-                                        label = "All Time Goals & Daily Targets",
+                                        label = "Goals & Daily Targets",
                                         checked = includeGoalsList,
-                                        onCheckedChange = { includeGoalsList = it }
+                                        onCheckedChange = { includeGoalsList = it },
+                                        showDivider = true
                                     )
 
                                     ExportOptionRow(
-                                        label = "Visual Monthly Calendar Grid",
+                                        label = "Monthly Calendar Grid",
                                         checked = includeCalendarGrid,
-                                        onCheckedChange = { includeCalendarGrid = it }
+                                        onCheckedChange = { includeCalendarGrid = it },
+                                        showDivider = true
                                     )
 
                                     ExportOptionRow(
-                                        label = "Monthly Review Insights & Streaks",
+                                        label = "Time Distribution",
+                                        checked = includeTimeDistribution,
+                                        onCheckedChange = { includeTimeDistribution = it },
+                                        showDivider = true
+                                    )
+
+                                    ExportOptionRow(
+                                        label = "Review Insights & Streaks",
                                         checked = includeInsights,
-                                        onCheckedChange = { includeInsights = it }
+                                        onCheckedChange = { includeInsights = it },
+                                        showDivider = false
                                     )
                                 }
                             }
@@ -3312,6 +3328,7 @@ private fun ExportPdfView(
                                                     includeGoalsList = includeGoalsList,
                                                     includeCalendarGrid = includeCalendarGrid,
                                                     includeDailyRecords = includeDailyRecords,
+                                                    includeTimeDistribution = includeTimeDistribution,
                                                     includeInsights = includeInsights
                                                 )
                                             )
@@ -3379,6 +3396,7 @@ private fun ExportPdfView(
                                                     includeGoalsList = includeGoalsList,
                                                     includeCalendarGrid = includeCalendarGrid,
                                                     includeDailyRecords = includeDailyRecords,
+                                                    includeTimeDistribution = includeTimeDistribution,
                                                     includeInsights = includeInsights
                                                 )
                                                 onExportMultiMonthPdf?.invoke(rangeStartMonth, rangeEndMonth, options)
@@ -3430,33 +3448,64 @@ private fun ExportPdfView(
 private fun ExportOptionRow(
     label: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    showDivider: Boolean = true
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Column(
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Checkbox(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = CheckboxDefaults.colors(
-                checkedColor = NudgeBlue,
-                checkmarkColor = Color.White
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onCheckedChange(!checked) }
+                .padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Minimal Plus / Tick Toggle Indicator (matches HTML reference)
+            Box(
+                modifier = Modifier
+                    .size(26.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (checked) {
+                    Text(
+                        text = "✓",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NudgeBlue,
+                        textAlign = TextAlign.Center
+                    )
+                } else {
+                    Text(
+                        text = "+",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f)
             )
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            ),
-            color = MaterialTheme.colorScheme.onBackground
-        )
+        }
+
+        if (showDivider) {
+            HorizontalDivider(
+                thickness = 0.75.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            )
+        }
     }
 }
 

@@ -39,6 +39,7 @@ data class TimeGoalsPdfOptions(
     val includeGoalsList: Boolean = true,
     val includeCalendarGrid: Boolean = true,
     val includeDailyRecords: Boolean = true,
+    val includeTimeDistribution: Boolean = true,
     val includeInsights: Boolean = true
 )
 
@@ -178,7 +179,7 @@ object TimeGoalsPdfExporter {
         }
 
         // 5. Time Distribution & Streak / Day Statistics
-        if (overallProgress.goalProgressList.isNotEmpty()) {
+        if (options.includeTimeDistribution && overallProgress.goalProgressList.isNotEmpty()) {
             val neededHeight = calculateTimeDistributionHeight(overallProgress.goalProgressList.size)
             if (currentY + neededHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
                 startNextPage()
@@ -308,7 +309,7 @@ object TimeGoalsPdfExporter {
             }
 
             // 5. Time Distribution & Streak / Day Statistics
-            if (overallProgress.goalProgressList.isNotEmpty()) {
+            if (options.includeTimeDistribution && overallProgress.goalProgressList.isNotEmpty()) {
                 val neededHeight = calculateTimeDistributionHeight(overallProgress.goalProgressList.size)
                 if (currentY + neededHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
                     startNextPage()
