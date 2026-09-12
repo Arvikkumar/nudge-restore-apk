@@ -60,12 +60,20 @@ class NudgeNotificationReceiver : BroadcastReceiver() {
 
         if (action == com.example.gentlenudge.deepdive.DeepDiveManager.ACTION_FIRE_DEEP_DIVE) {
             val style = intent.getStringExtra("deep_dive_notification_style") ?: "One Shot"
-            com.example.gentlenudge.deepdive.DeepDiveManager.onAlarmFired(context, style)
+            val isReminder = intent.getBooleanExtra(com.example.gentlenudge.deepdive.DeepDiveManager.EXTRA_IS_REMINDER, false)
+            if (isReminder) {
+                val reminderTime = intent.getLongExtra(com.example.gentlenudge.deepdive.DeepDiveManager.EXTRA_REMINDER_TIME_MILLIS, 0L)
+                val label = intent.getStringExtra(com.example.gentlenudge.deepdive.DeepDiveManager.EXTRA_REMINDER_LABEL) ?: "Reminder"
+                com.example.gentlenudge.deepdive.DeepDiveManager.onReminderAlarmFired(context, reminderTime, label, style)
+            } else {
+                com.example.gentlenudge.deepdive.DeepDiveManager.onAlarmFired(context, style)
+            }
             return
         }
 
         if (action == com.example.gentlenudge.deepdive.DeepDiveManager.ACTION_DISMISS_DEEP_DIVE) {
-            com.example.gentlenudge.deepdive.DeepDiveManager.dismissNotification(context)
+            val notificationId = intent.getIntExtra("notification_id", com.example.gentlenudge.deepdive.DeepDiveManager.DEEP_DIVE_NOTIFICATION_ID)
+            com.example.gentlenudge.deepdive.DeepDiveManager.dismissNotification(context, notificationId)
             return
         }
 
@@ -131,9 +139,54 @@ class NudgeNotificationReceiver : BroadcastReceiver() {
 
                     NudgeNotificationHelper.ACTION_MARK_DONE -> {
                         val task = dao.getTaskById(taskId)
+                        val isRepeatingExtra = intent.getBooleanExtra(NudgeNotificationHelper.EXTRA_TASK_IS_REPEATING, false)
+                        val isRepeating = isRepeatingExtra || (task != null && NudgeAlarmScheduler.isTaskRepeating(task))
+
                         if (task != null) {
-                            if (!task.isDone) {
-                                repository.toggleDone(task)
+                            if (isRepeating) {
+                                val occurrenceDate = intent.getStringExtra(NudgeNotificationHelper.EXTRA_TASK_OCCURRENCE_DATE) ?: task.dateLabel
+                                val occurrenceTime = intent.getStringExtra(NudgeNotificationHelper.EXTRA_TASK_OCCURRENCE_TIME) ?: task.timeLabel
+                                val occurrenceKey = "done_occurrence_${taskId}_${occurrenceDate}_${occurrenceTime}"
+                                val prefs = context.getSharedPreferences("gentle_nudge_prefs", Context.MODE_PRIVATE)
+                                val alreadyClaimed = prefs.getBoolean(occurrenceKey, false)
+
+                                if (!alreadyClaimed) {
+                                    prefs.edit().putBoolean(occurrenceKey, true).apply()
+
+                                    val completedOccurrence = task.copy(
+                                        id = 0,
+                                        dateLabel = occurrenceDate,
+                                        timeLabel = occurrenceTime,
+                                        isDone = true,
+                                        completedAt = System.currentTimeMillis()
+                                    )
+                                    dao.insertTask(completedOccurrence)
+                                }
+
+                                // Check if the database task was already advanced to the next occurrence
+                                val wasAlreadyAdvanced = !task.dateLabel.equals(occurrenceDate, ignoreCase = true)
+                                if (!wasAlreadyAdvanced) {
+                                    // Task in DB is still on the current occurrence; advance it to next occurrence
+                                    val nextTask = calculateNextOccurrenceTask(task)
+                                    if (nextTask != null) {
+                                        dao.updateTask(nextTask)
+                                        val advancedCal = calculateNextCalendar(Calendar.getInstance(), task.repeat.trim())
+                                        if (advancedCal != null) {
+                                            NudgeAlarmScheduler.saveScheduledTriggerMillis(context, nextTask.id, advancedCal.timeInMillis)
+                                        }
+                                        NudgeAlarmScheduler.scheduleTask(context, nextTask, forceRecalculate = false)
+                                    }
+                                } else {
+                                    // Task in DB was already advanced to next occurrence.
+                                    // Ensure it remains active (isDone = false) and scheduled.
+                                    if (task.isDone) {
+                                        dao.updateTask(task.copy(isDone = false, completedAt = null))
+                                    }
+                                }
+                            } else {
+                                if (!task.isDone) {
+                                    repository.toggleDone(task)
+                                }
                             }
                         }
                         // Always dismiss notification even if task was already deleted/removed

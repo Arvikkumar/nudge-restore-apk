@@ -2,6 +2,7 @@ package com.example.gentlenudge.ui.components
 
 import android.app.TimePickerDialog
 import android.text.format.DateFormat
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -28,8 +29,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.HourglassBottom
 import androidx.compose.material.icons.outlined.Notifications
@@ -39,6 +42,7 @@ import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -326,6 +330,15 @@ fun DeepDiveConfigSheet(
         mutableStateOf(if (initialStyle.equals("Full Ringtone", ignoreCase = true)) "Full Ringtone" else "One Shot")
     }
 
+    // Reminders State
+    data class ReminderItem(
+        val id: String,
+        val triggerMillis: Long,
+        val label: String
+    )
+    var selectedReminders by remember { mutableStateOf<List<ReminderItem>>(emptyList()) }
+    var showAddReminderDialog by remember { mutableStateOf(false) }
+
     // Function to calculate target time based on selected duration
     fun calculateTargetMillis(): Long {
         val now = System.currentTimeMillis()
@@ -338,6 +351,85 @@ fun DeepDiveConfigSheet(
             }
             else -> now + (30 * 60 * 1000L)
         }
+    }
+
+    // Prune reminders that would be at or after the end time if the duration changes
+    LaunchedEffect(selectedOption, customTargetMillis) {
+        val currentEnd = calculateTargetMillis()
+        if (selectedReminders.any { it.triggerMillis >= currentEnd }) {
+            selectedReminders = selectedReminders.filter { it.triggerMillis < currentEnd }
+        }
+    }
+
+    fun openCustomReminderTimePicker(targetEnd: Long) {
+        val now = System.currentTimeMillis()
+        if (targetEnd <= now + 60_000L) {
+            Toast.makeText(context, "No valid reminder time available before the Deep Dive ends.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val cal = Calendar.getInstance()
+        val halfway = (now + targetEnd) / 2
+        cal.timeInMillis = halfway
+
+        val is24Hour = DateFormat.is24HourFormat(context)
+        val endFormatted = timeFormatter.format(Date(targetEnd)).lowercase(Locale.getDefault())
+
+        val timePickerDialog = TimePickerDialog(
+            context,
+            { _, hourOfDay, minute ->
+                val currentNow = System.currentTimeMillis()
+                val currentEnd = calculateTargetMillis()
+                val pickedMillis = DeepDiveManager.resolveCustomReminderMillis(
+                    hourOfDay = hourOfDay,
+                    minute = minute,
+                    nowMillis = currentNow,
+                    targetEndMillis = currentEnd
+                )
+
+                if (pickedMillis == null) {
+                    val formattedLimit = timeFormatter.format(Date(currentEnd)).lowercase(Locale.getDefault())
+                    Toast.makeText(
+                        context,
+                        "Reminder must be before the Deep Dive ends (before $formattedLimit).",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    openCustomReminderTimePicker(currentEnd)
+                    return@TimePickerDialog
+                }
+
+                // Final safety net validation (Requirement 9)
+                if (pickedMillis <= currentNow) {
+                    Toast.makeText(context, "Reminder must be in the future.", Toast.LENGTH_SHORT).show()
+                    openCustomReminderTimePicker(currentEnd)
+                    return@TimePickerDialog
+                }
+                if (pickedMillis >= currentEnd) {
+                    Toast.makeText(context, "Reminder must be before the Deep Dive ends.", Toast.LENGTH_SHORT).show()
+                    openCustomReminderTimePicker(currentEnd)
+                    return@TimePickerDialog
+                }
+
+                // Duplicate prevention (Requirement 8)
+                val isDuplicate = selectedReminders.any { Math.abs(it.triggerMillis - pickedMillis) < 60_000L }
+                if (isDuplicate) {
+                    Toast.makeText(context, "A reminder for this time already exists.", Toast.LENGTH_SHORT).show()
+                    return@TimePickerDialog
+                }
+
+                val formatted = timeFormatter.format(Date(pickedMillis)).lowercase(Locale.getDefault())
+                selectedReminders = (selectedReminders + ReminderItem(
+                    id = "custom_${pickedMillis}",
+                    triggerMillis = pickedMillis,
+                    label = "Custom"
+                )).sortedBy { it.triggerMillis }
+            },
+            cal.get(Calendar.HOUR_OF_DAY),
+            cal.get(Calendar.MINUTE),
+            is24Hour
+        )
+        timePickerDialog.setTitle("Reminder (before $endFormatted)")
+        timePickerDialog.show()
     }
 
     fun openCustomTimePicker() {
@@ -469,6 +561,11 @@ fun DeepDiveConfigSheet(
                     val calculatedTime = when (option) {
                         "30 minutes" -> "until " + timeFormatter.format(Date(now + 30 * 60 * 1000L)).lowercase(Locale.getDefault())
                         "1 hour" -> "until " + timeFormatter.format(Date(now + 60 * 60 * 1000L)).lowercase(Locale.getDefault())
+                        "Custom" -> {
+                            if (customTargetMillis > now) {
+                                "until " + timeFormatter.format(Date(customTargetMillis)).lowercase(Locale.getDefault())
+                            } else null
+                        }
                         else -> null
                     }
 
@@ -511,36 +608,14 @@ fun DeepDiveConfigSheet(
                                     modifier = Modifier.size(20.dp)
                                 )
 
-                                if (option == "Custom") {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = "Custom",
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.5.sp
-                                            ),
-                                            color = Color(0xFF161513)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = if (customTimeText != null) "($customTimeText)" else "(exact clock time)",
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontWeight = FontWeight.Normal,
-                                                fontSize = 13.5.sp
-                                            ),
-                                            color = Color(0xFF756F67)
-                                        )
-                                    }
-                                } else {
-                                    Text(
-                                        text = option,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.5.sp
-                                        ),
-                                        color = Color(0xFF161513)
-                                    )
-                                }
+                                Text(
+                                    text = option,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.5.sp
+                                    ),
+                                    color = Color(0xFF161513)
+                                )
                             }
 
                             Row(
@@ -568,6 +643,400 @@ fun DeepDiveConfigSheet(
                         }
                     }
                 }
+            }
+
+            // ADD REMINDERS (OPTIONAL) Section
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "ADD REMINDERS (OPTIONAL)",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.1.sp,
+                            fontSize = 11.5.sp
+                        ),
+                        color = Color(0xFF756F67)
+                    )
+                    Text(
+                        text = "Set one or more reminders during this Deep Dive.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        ),
+                        color = Color(0xFF756F67)
+                    )
+                }
+
+                // Removable rows of selected reminder points
+                if (selectedReminders.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        selectedReminders.forEach { reminder ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .testTag("selected_reminder_${reminder.id}"),
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFF3F7FF),
+                                border = BorderStroke(1.dp, Color(0xFFD0E1FD))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Alarm,
+                                            contentDescription = null,
+                                            tint = NudgeBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = reminder.label,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 13.5.sp
+                                                ),
+                                                color = Color(0xFF1E3A8A)
+                                            )
+                                            Text(
+                                                text = "At ${timeFormatter.format(Date(reminder.triggerMillis)).lowercase(Locale.getDefault())}",
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontSize = 11.5.sp
+                                                ),
+                                                color = Color(0xFF756F67)
+                                            )
+                                        }
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            selectedReminders = selectedReminders.filter { it.id != reminder.id }
+                                        },
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .testTag("remove_reminder_${reminder.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove reminder",
+                                            tint = Color(0xFF756F67),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Add reminder button
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { showAddReminderDialog = true }
+                        .testTag("add_reminder_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFFAFAFA),
+                    border = BorderStroke(1.dp, Color(0xFFECEAE4))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = NudgeBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "+ Add reminder",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.5.sp
+                            ),
+                            color = NudgeBlue
+                        )
+                    }
+                }
+            }
+
+            // Dialog for choosing a reminder point
+            if (showAddReminderDialog) {
+                val now = System.currentTimeMillis()
+                val targetEnd = calculateTargetMillis()
+                val durationMinutes = ((targetEnd - now) / 60000).toInt()
+
+                AlertDialog(
+                    onDismissRequest = { showAddReminderDialog = false },
+                    title = {
+                        Text(
+                            text = "Add reminder",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            ),
+                            color = Color(0xFF161513)
+                        )
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Choose when you want to be reminded before your session ends:",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                color = Color(0xFF756F67)
+                            )
+
+                            // 15 min option: only valid if duration > 15 min
+                            if (durationMinutes > 15) {
+                                val isAdded = selectedReminders.any { it.label == "15 min" }
+                                if (!isAdded) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                val trigger = now + (15 * 60 * 1000L)
+                                                selectedReminders = (selectedReminders + ReminderItem(
+                                                    id = "15m",
+                                                    triggerMillis = trigger,
+                                                    label = "15 min"
+                                                )).sortedBy { it.triggerMillis }
+                                                showAddReminderDialog = false
+                                            }
+                                            .testTag("reminder_option_15_min"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color(0xFFF3F7FF),
+                                        border = BorderStroke(1.dp, Color(0xFFD0E1FD))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Alarm,
+                                                    contentDescription = null,
+                                                    tint = NudgeBlue,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Text(
+                                                    text = "15 min",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 14.sp
+                                                    ),
+                                                    color = Color(0xFF1E3A8A)
+                                                )
+                                            }
+                                            Text(
+                                                text = timeFormatter.format(Date(now + 15 * 60 * 1000L)).lowercase(Locale.getDefault()),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color(0xFF756F67)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 30 min option: only valid if duration > 30 min
+                            if (durationMinutes > 30) {
+                                val isAdded = selectedReminders.any { it.label == "30 min" }
+                                if (!isAdded) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                val trigger = now + (30 * 60 * 1000L)
+                                                selectedReminders = (selectedReminders + ReminderItem(
+                                                    id = "30m",
+                                                    triggerMillis = trigger,
+                                                    label = "30 min"
+                                                )).sortedBy { it.triggerMillis }
+                                                showAddReminderDialog = false
+                                            }
+                                            .testTag("reminder_option_30_min"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color(0xFFF3F7FF),
+                                        border = BorderStroke(1.dp, Color(0xFFD0E1FD))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Alarm,
+                                                    contentDescription = null,
+                                                    tint = NudgeBlue,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Text(
+                                                    text = "30 min",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 14.sp
+                                                    ),
+                                                    color = Color(0xFF1E3A8A)
+                                                )
+                                            }
+                                            Text(
+                                                text = timeFormatter.format(Date(now + 30 * 60 * 1000L)).lowercase(Locale.getDefault()),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color(0xFF756F67)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 45 min option: only valid if duration > 45 min
+                            if (durationMinutes > 45) {
+                                val isAdded = selectedReminders.any { it.label == "45 min" }
+                                if (!isAdded) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                val trigger = now + (45 * 60 * 1000L)
+                                                selectedReminders = (selectedReminders + ReminderItem(
+                                                    id = "45m",
+                                                    triggerMillis = trigger,
+                                                    label = "45 min"
+                                                )).sortedBy { it.triggerMillis }
+                                                showAddReminderDialog = false
+                                            }
+                                            .testTag("reminder_option_45_min"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color(0xFFF3F7FF),
+                                        border = BorderStroke(1.dp, Color(0xFFD0E1FD))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Alarm,
+                                                    contentDescription = null,
+                                                    tint = NudgeBlue,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Text(
+                                                    text = "45 min",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 14.sp
+                                                    ),
+                                                    color = Color(0xFF1E3A8A)
+                                                )
+                                            }
+                                            Text(
+                                                text = timeFormatter.format(Date(now + 45 * 60 * 1000L)).lowercase(Locale.getDefault()),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color(0xFF756F67)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Custom option
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        val currentTargetEnd = calculateTargetMillis()
+                                        val currentNow = System.currentTimeMillis()
+                                        if (currentTargetEnd <= currentNow + 60_000L) {
+                                            Toast.makeText(context, "No valid reminder time available before the Deep Dive ends.", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            showAddReminderDialog = false
+                                            openCustomReminderTimePicker(currentTargetEnd)
+                                        }
+                                    }
+                                    .testTag("reminder_option_custom"),
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFFAFAFA),
+                                border = BorderStroke(1.dp, Color(0xFFECEAE4))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Schedule,
+                                            contentDescription = null,
+                                            tint = Color(0xFF756F67),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Custom",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
+                                            ),
+                                            color = Color(0xFF161513)
+                                        )
+                                    }
+                                    val endFormatted = timeFormatter.format(Date(targetEnd)).lowercase(Locale.getDefault())
+                                    Text(
+                                        text = "Before $endFormatted",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF756F67)
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {},
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showAddReminderDialog = false },
+                            modifier = Modifier.testTag("cancel_add_reminder_button")
+                        ) {
+                            Text("Cancel", color = Color(0xFF756F67))
+                        }
+                    },
+                    containerColor = Color.White,
+                    shape = RoundedCornerShape(20.dp)
+                )
             }
 
             // Notification Style Section
@@ -747,6 +1216,12 @@ fun DeepDiveConfigSheet(
                             openCustomTimePicker()
                         } else {
                             val targetMillis = calculateTargetMillis()
+                            val now = System.currentTimeMillis()
+                            val points = selectedReminders
+                                .filter { it.triggerMillis > now && it.triggerMillis < targetMillis }
+                                .sortedBy { it.triggerMillis }
+                                .map { DeepDiveManager.ReminderPoint(it.triggerMillis, it.label) }
+                            DeepDiveManager.setPendingReminders(points)
                             onConfirmStart(targetMillis, selectedNotificationStyle)
                         }
                     }
@@ -891,6 +1366,39 @@ fun DeepDiveActiveDetailSheet(
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    if (state.reminderPoints.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Scheduled reminders:",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                letterSpacing = 0.5.sp
+                            ),
+                            color = NudgeBlue
+                        )
+                        state.reminderPoints.forEach { reminder ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Alarm,
+                                    contentDescription = null,
+                                    tint = NudgeBlue,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "${reminder.label} · ${DeepDiveManager.formatClockTime(reminder.triggerTimeMillis)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 12.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

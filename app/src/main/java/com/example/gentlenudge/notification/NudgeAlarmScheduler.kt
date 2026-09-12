@@ -369,6 +369,9 @@ object NudgeAlarmScheduler {
             calendar.set(Calendar.MINUTE, parsedHourMinute.second)
             calendar.set(Calendar.SECOND, 0)
             calendar.set(Calendar.MILLISECOND, 0)
+            if (dateLabel.equals("Tonight", ignoreCase = true) && calendar.timeInMillis <= now) {
+                calendar.add(Calendar.DAY_OF_YEAR, 1)
+            }
         } else {
             // Default time if unspecified or "Any time"
             if (dateLabel.equals("Tonight", ignoreCase = true)) {
@@ -378,6 +381,14 @@ object NudgeAlarmScheduler {
                 calendar.set(Calendar.MILLISECOND, 0)
                 if (calendar.timeInMillis <= now) {
                     calendar.add(Calendar.MINUTE, 30)
+                }
+                if (calendar.timeInMillis <= now) {
+                    // Normal Tonight cutoff (8:30 PM) has passed. Advance to next valid occurrence (tomorrow night at 8:00 PM)
+                    calendar.add(Calendar.DAY_OF_YEAR, 1)
+                    calendar.set(Calendar.HOUR_OF_DAY, 20)
+                    calendar.set(Calendar.MINUTE, 0)
+                    calendar.set(Calendar.SECOND, 0)
+                    calendar.set(Calendar.MILLISECOND, 0)
                 }
             } else if (dateLabel.equals("Today", ignoreCase = true)) {
                 // If it's today and no time specified, default to 1 hour from now
