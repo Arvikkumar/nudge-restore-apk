@@ -139,12 +139,6 @@ object NudgeBackupManager {
         if (prefs.contains("user_name")) {
             prefMap["user_name"] = prefs.getString("user_name", "cyrus")
         }
-        if (prefs.contains(NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED)) {
-            prefMap[NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED] = prefs.getBoolean(NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED, false)
-        }
-        if (prefs.contains(NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS)) {
-            prefMap[NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS] = prefs.getInt(NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS, 30)
-        }
         if (prefs.contains(NudgeBackupScheduler.KEY_AUTO_BACKUP_ENABLED)) {
             prefMap[NudgeBackupScheduler.KEY_AUTO_BACKUP_ENABLED] = prefs.getBoolean(NudgeBackupScheduler.KEY_AUTO_BACKUP_ENABLED, false)
         }
@@ -750,18 +744,6 @@ object NudgeBackupManager {
         }
         if (p.containsKey("user_name")) {
             prefEdit.putString("user_name", p["user_name"] as? String ?: "cyrus")
-        }
-        if (p.containsKey(NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED)) {
-            val v = p[NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED] as? Boolean
-                ?: p[NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED]?.toString()?.toBooleanStrictOrNull()
-                ?: false
-            prefEdit.putBoolean(NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED, v)
-        }
-        if (p.containsKey(NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS)) {
-            val v = (p[NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS] as? Number)?.toInt()
-                ?: p[NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS]?.toString()?.toIntOrNull()
-                ?: 30
-            prefEdit.putInt(NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS, v)
         }
         if (p.containsKey(NudgeBackupScheduler.KEY_AUTO_BACKUP_ENABLED)) {
             val v = p[NudgeBackupScheduler.KEY_AUTO_BACKUP_ENABLED] as? Boolean

@@ -152,8 +152,6 @@ fun MainScreen(
 
     // Backup & Data Safety state
     val lastBackupTimestamp by viewModel.lastBackupTimestamp.collectAsStateWithLifecycle()
-    val backupReminderEnabled by viewModel.backupReminderEnabled.collectAsStateWithLifecycle()
-    val backupReminderDays by viewModel.backupReminderDays.collectAsStateWithLifecycle()
     val autoBackupEnabled by viewModel.autoBackupEnabled.collectAsStateWithLifecycle()
     val autoBackupDay by viewModel.autoBackupDay.collectAsStateWithLifecycle()
     val autoBackupHour by viewModel.autoBackupHour.collectAsStateWithLifecycle()
@@ -327,21 +325,6 @@ fun MainScreen(
                     showRestoreDialog = true
                 }
             }
-        }
-    }
-
-    // Check if app was opened via Backup Reminder notification action "Create Backup"
-    LaunchedEffect(Unit) {
-        val activity = context as? Activity
-        val triggerBackup = activity?.intent?.getBooleanExtra(
-            NudgeBackupScheduler.EXTRA_TRIGGER_MANUAL_BACKUP,
-            false
-        ) ?: false
-        if (triggerBackup) {
-            activity?.intent?.removeExtra(NudgeBackupScheduler.EXTRA_TRIGGER_MANUAL_BACKUP)
-            activeView = NudgeView.SETTINGS
-            val defaultName = NudgeBackupManager.generateDefaultBackupFileName()
-            createBackupLauncher.launch(defaultName)
         }
     }
 
@@ -576,10 +559,6 @@ fun MainScreen(
                                     restoreBackupLauncher.launch(arrayOf("*/*"))
                                 },
                                 lastBackupTimestamp = lastBackupTimestamp,
-                                backupReminderEnabled = backupReminderEnabled,
-                                onToggleBackupReminder = { viewModel.toggleBackupReminder() },
-                                backupReminderDays = backupReminderDays,
-                                onSetBackupReminderDays = { viewModel.setBackupReminderDays(it) },
                                 autoBackupEnabled = autoBackupEnabled,
                                 onToggleAutoBackup = { viewModel.toggleAutoBackup() },
                                 autoBackupDay = autoBackupDay,

@@ -159,16 +159,6 @@ class NudgeViewModel(
     )
     val lastBackupTimestamp: StateFlow<Long> = _lastBackupTimestamp.asStateFlow()
 
-    private val _backupReminderEnabled = MutableStateFlow(
-        prefs.getBoolean(NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED, false)
-    )
-    val backupReminderEnabled: StateFlow<Boolean> = _backupReminderEnabled.asStateFlow()
-
-    private val _backupReminderDays = MutableStateFlow(
-        prefs.getInt(NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS, 30)
-    )
-    val backupReminderDays: StateFlow<Int> = _backupReminderDays.asStateFlow()
-
     private val _autoBackupEnabled = MutableStateFlow(
         prefs.getBoolean(NudgeBackupScheduler.KEY_AUTO_BACKUP_ENABLED, false)
     )
@@ -921,7 +911,6 @@ class NudgeViewModel(
             result.onSuccess { manifest ->
                 val now = System.currentTimeMillis()
                 _lastBackupTimestamp.value = now
-                NudgeBackupScheduler.scheduleBackupReminder(app)
 
                 val msg = "Backup complete: ${manifest.tasksCount} notes, ${manifest.timeGoalsCount} pursuits saved."
                 showToast(msg)
@@ -932,25 +921,6 @@ class NudgeViewModel(
                 onComplete?.invoke(false, msg)
             }
         }
-    }
-
-    fun toggleBackupReminder() {
-        val next = !_backupReminderEnabled.value
-        _backupReminderEnabled.value = next
-        prefs.edit().putBoolean(NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED, next).apply()
-        NudgeBackupScheduler.scheduleBackupReminder(getApplication())
-        if (next) {
-            showToast("Backup reminder turned on.")
-        } else {
-            showToast("Backup reminder turned off.")
-        }
-    }
-
-    fun setBackupReminderDays(days: Int) {
-        _backupReminderDays.value = days
-        prefs.edit().putInt(NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS, days).apply()
-        NudgeBackupScheduler.scheduleBackupReminder(getApplication())
-        showToast("Reminder frequency set to $days days.")
     }
 
     fun toggleAutoBackup() {
@@ -1037,8 +1007,6 @@ class NudgeViewModel(
                 _defaultSnooze.value = prefs.getString("default_snooze", "30 minutes") ?: "30 minutes"
                 _userName.value = prefs.getString("user_name", "cyrus")?.ifBlank { "cyrus" } ?: "cyrus"
 
-                _backupReminderEnabled.value = prefs.getBoolean(NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED, false)
-                _backupReminderDays.value = prefs.getInt(NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS, 30)
                 _autoBackupEnabled.value = prefs.getBoolean(NudgeBackupScheduler.KEY_AUTO_BACKUP_ENABLED, false)
                 _autoBackupDay.value = prefs.getInt(NudgeBackupScheduler.KEY_AUTO_BACKUP_DAY, Calendar.SUNDAY)
                 _autoBackupHour.value = prefs.getInt(NudgeBackupScheduler.KEY_AUTO_BACKUP_HOUR, 23)
@@ -1054,8 +1022,7 @@ class NudgeViewModel(
                     }
                 }
 
-                // Restore background scheduling state for Backup Reminder, Automatic Backup, and Calendar Events
-                NudgeBackupScheduler.scheduleBackupReminder(app)
+                // Restore background scheduling state for Automatic Backup and Calendar Events
                 NudgeBackupScheduler.scheduleAutoBackup(app)
                 NudgeEventNotificationScheduler.rescheduleIfEnabled(app)
 

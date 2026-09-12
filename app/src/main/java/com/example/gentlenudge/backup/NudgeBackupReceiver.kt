@@ -44,39 +44,6 @@ class NudgeBackupReceiver : BroadcastReceiver() {
                     }
                 }
             }
-
-            NudgeBackupScheduler.ACTION_TRIGGER_BACKUP_REMINDER -> {
-                val isEnabled = prefs.getBoolean(NudgeBackupScheduler.KEY_BACKUP_REMINDER_ENABLED, false)
-                if (!isEnabled) return
-
-                val lastBackup = prefs.getLong(NudgeBackupScheduler.KEY_LAST_BACKUP_TIMESTAMP, 0L)
-                val intervalDays = prefs.getInt(NudgeBackupScheduler.KEY_BACKUP_REMINDER_DAYS, 30)
-                val intervalMillis = intervalDays * 24L * 60L * 60L * 1000L
-                val now = System.currentTimeMillis()
-
-                val shouldNotify = if (lastBackup > 0L) {
-                    (now - lastBackup) >= intervalMillis
-                } else {
-                    val lastNotified = prefs.getLong(NudgeBackupScheduler.KEY_BACKUP_REMINDER_LAST_NOTIFIED, 0L)
-                    if (lastNotified > 0L) {
-                        (now - lastNotified) >= intervalMillis
-                    } else {
-                        true
-                    }
-                }
-
-                if (shouldNotify) {
-                    NudgeBackupScheduler.showBackupReminderNotification(context)
-                    prefs.edit().putLong(NudgeBackupScheduler.KEY_BACKUP_REMINDER_LAST_NOTIFIED, now).apply()
-                }
-
-                // Reschedule for next reminder check
-                NudgeBackupScheduler.scheduleBackupReminder(context)
-            }
-
-            NudgeBackupScheduler.ACTION_BACKUP_REMINDER_LATER -> {
-                NudgeBackupScheduler.handleReminderLater(context)
-            }
         }
     }
 }

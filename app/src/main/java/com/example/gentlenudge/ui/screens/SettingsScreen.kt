@@ -44,7 +44,6 @@ import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Today
@@ -86,7 +85,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.gentlenudge.backup.NudgeBackupScheduler
-import com.example.gentlenudge.ui.components.GentleNudgeLogo
+import com.example.gentlenudge.ui.components.MinimalAnalogClock
 import com.example.gentlenudge.ui.theme.NudgeBlue
 import com.example.gentlenudge.ui.theme.NudgeBlueContainer
 import java.util.Calendar
@@ -106,10 +105,6 @@ fun SettingsScreen(
     onRestoreBackup: () -> Unit = {},
     // Backup & Data Safety state & actions
     lastBackupTimestamp: Long = 0L,
-    backupReminderEnabled: Boolean = false,
-    onToggleBackupReminder: () -> Unit = {},
-    backupReminderDays: Int = 30,
-    onSetBackupReminderDays: (Int) -> Unit = {},
     autoBackupEnabled: Boolean = false,
     onToggleAutoBackup: () -> Unit = {},
     autoBackupDay: Int = Calendar.SUNDAY,
@@ -122,7 +117,6 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
 
-    var showReminderFreqDialog by remember { mutableStateOf(false) }
     var showAutoScheduleDialog by remember { mutableStateOf(false) }
     var isAlertsExpanded by rememberSaveable { mutableStateOf(false) }
     var isBackupExpanded by rememberSaveable { mutableStateOf(false) }
@@ -154,16 +148,6 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .padding(top = 2.dp, bottom = 4.dp)
             ) {
-                Text(
-                    text = "MAKE IT YOURS",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        letterSpacing = 1.2.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp
-                    ),
-                    color = NudgeBlue
-                )
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "Settings that",
                     style = MaterialTheme.typography.displayMedium.copy(
@@ -256,28 +240,6 @@ fun SettingsScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), thickness = 0.8.dp)
 
                     SettingToggleRow(
-                        icon = Icons.Outlined.NotificationsActive,
-                        title = "Backup Reminder",
-                        description = "Remind me when I haven't backed up recently",
-                        checked = backupReminderEnabled,
-                        onCheckedChange = { onToggleBackupReminder() }
-                    )
-
-                    if (backupReminderEnabled) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), thickness = 0.8.dp)
-
-                        SettingActionRow(
-                            icon = Icons.Outlined.AccessTime,
-                            title = "Reminder frequency",
-                            description = "How often Nudge gently reminds you",
-                            actionText = "$backupReminderDays days ⌵",
-                            onClick = { showReminderFreqDialog = true }
-                        )
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), thickness = 0.8.dp)
-
-                    SettingToggleRow(
                         icon = Icons.Outlined.Autorenew,
                         title = "Automatic Backup",
                         description = "Automatically create a local backup of my Nudge data",
@@ -357,25 +319,12 @@ fun SettingsScreen(
 
         // Brand signature footer
         item {
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(top = 35.dp, bottom = 0.dp),
+                contentAlignment = Alignment.Center
             ) {
-                GentleNudgeLogo(
-                    size = 36.dp,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                )
-                Text(
-                    text = "Nudge",
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 0.5.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 Text(
                     text = "A jack of all trades is master of none,\nbut often better than a master of one.",
                     style = MaterialTheme.typography.bodyMedium.copy(
@@ -391,82 +340,21 @@ fun SettingsScreen(
         }
 
         item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 24.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                MinimalAnalogClock(
+                    modifier = Modifier.size(210.dp)
+                )
+            }
+        }
+
+        item {
             Spacer(modifier = Modifier.height(20.dp))
         }
-    }
-
-    // Dialog: Select Backup Reminder Frequency
-    if (showReminderFreqDialog) {
-        val frequencies = listOf(7, 14, 30, 60, 90)
-        var selectedFreq by remember { mutableStateOf(backupReminderDays) }
-
-        AlertDialog(
-            onDismissRequest = { showReminderFreqDialog = false },
-            title = {
-                Text(
-                    text = "Backup Reminder Frequency",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "Choose how often you would like Nudge to remind you if no recent backup has been created:",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    frequencies.forEach { days ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .selectable(
-                                    selected = (selectedFreq == days),
-                                    onClick = { selectedFreq = days },
-                                    role = Role.RadioButton
-                                )
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (selectedFreq == days),
-                                onClick = { selectedFreq = days },
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = NudgeBlue,
-                                    unselectedColor = MaterialTheme.colorScheme.outline
-                                )
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "$days days" + if (days == 30) " (Default)" else "",
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = if (selectedFreq == days) FontWeight.SemiBold else FontWeight.Normal
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onSetBackupReminderDays(selectedFreq)
-                        showReminderFreqDialog = false
-                    }
-                ) {
-                    Text("Save", color = NudgeBlue, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showReminderFreqDialog = false }) {
-                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        )
     }
 
     // Dialog: Select Automatic Backup Schedule (Day & Time)

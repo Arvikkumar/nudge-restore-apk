@@ -19,7 +19,6 @@ class GentleNudgeApp : Application() {
         super.onCreate()
         try {
             NudgeNotificationHelper.createNotificationChannels(this)
-            NudgeBackupScheduler.createNotificationChannel(this)
             NudgeBackupScheduler.rescheduleAll(this)
             NudgeEventNotificationScheduler.rescheduleIfEnabled(this)
         } catch (e: Exception) {

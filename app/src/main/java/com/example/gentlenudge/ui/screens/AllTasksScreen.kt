@@ -95,16 +95,6 @@ fun AllTasksScreen(
                     .padding(top = 2.dp, bottom = 4.dp)
             ) {
                 Text(
-                    text = "YOUR LITTLE LIST",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        letterSpacing = 1.2.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp
-                    ),
-                    color = NudgeBlue
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
                     text = "Your notes,",
                     style = MaterialTheme.typography.displayMedium.copy(
                         fontSize = 28.sp,

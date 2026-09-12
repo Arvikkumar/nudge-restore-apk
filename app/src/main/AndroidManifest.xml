@@ -73,14 +73,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- Backup & Data Safety Receiver for Reminders and Automatic Backups -->
+        <!-- Backup & Data Safety Receiver for Automatic Backups -->
         <receiver
             android:name=".backup.NudgeBackupReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.example.gentlenudge.ACTION_TRIGGER_AUTO_BACKUP" />
-                <action android:name="com.example.gentlenudge.ACTION_TRIGGER_BACKUP_REMINDER" />
-                <action android:name="com.example.gentlenudge.ACTION_BACKUP_REMINDER_LATER" />
             </intent-filter>
         </receiver>
     </application>
