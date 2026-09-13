@@ -88,6 +88,7 @@ import com.example.gentlenudge.backup.NudgeBackupScheduler
 import com.example.gentlenudge.ui.components.MinimalAnalogClock
 import com.example.gentlenudge.ui.theme.NudgeBlue
 import com.example.gentlenudge.ui.theme.NudgeBlueContainer
+import com.example.gentlenudge.widget.NudgeWidgetPinningHelper
 import java.util.Calendar
 
 @Composable
@@ -347,7 +348,16 @@ fun SettingsScreen(
                 contentAlignment = Alignment.TopCenter
             ) {
                 MinimalAnalogClock(
-                    modifier = Modifier.size(210.dp)
+                    modifier = Modifier
+                        .size(210.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            NudgeWidgetPinningHelper.requestPinClockWidget(context) { msg ->
+                                onShowToast(msg)
+                            }
+                        }
                 )
             }
         }

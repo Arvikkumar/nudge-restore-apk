@@ -1,7 +1,5 @@
 package com.example.gentlenudge.ui.components
 
-import android.app.TimePickerDialog
-import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -16,6 +14,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.HourglassBottom
@@ -64,6 +65,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,6 +83,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.gentlenudge.R
@@ -321,9 +325,30 @@ fun DeepDiveConfigSheet(
     val durationOptions = listOf("30 minutes", "1 hour", "Custom")
     var selectedOption by remember { mutableStateOf("30 minutes") }
 
-    // Custom time state
-    var customTargetMillis by remember { mutableLongStateOf(0L) }
-    var customTimeText by remember { mutableStateOf<String?>(null) }
+    // Custom duration state (in minutes)
+    var customDurationMinutes by remember { mutableIntStateOf(0) }
+    var showCustomDurationDialog by remember { mutableStateOf(false) }
+
+    fun formatDurationLabel(minutes: Int): String {
+        val h = minutes / 60
+        val m = minutes % 60
+        val hText = when {
+            h == 1 -> "1 hour"
+            h > 1 -> "$h hours"
+            else -> ""
+        }
+        val mText = when {
+            m == 1 -> "1 minute"
+            m > 1 -> "$m minutes"
+            else -> ""
+        }
+        return when {
+            h > 0 && m > 0 -> "$hText $mText"
+            h > 0 -> hText
+            m > 0 -> mText
+            else -> "Custom"
+        }
+    }
 
     // Notification Style: "One Shot" or "Full Ringtone"
     var selectedNotificationStyle by remember {
@@ -334,10 +359,15 @@ fun DeepDiveConfigSheet(
     data class ReminderItem(
         val id: String,
         val triggerMillis: Long,
-        val label: String
+        val label: String,
+        val subLabel: String? = null,
+        val offsetMinutes: Int? = null
     )
     var selectedReminders by remember { mutableStateOf<List<ReminderItem>>(emptyList()) }
     var showAddReminderDialog by remember { mutableStateOf(false) }
+    var showCustomReminderDurationDialog by remember { mutableStateOf(false) }
+    var tempReminderHours by remember { mutableIntStateOf(0) }
+    var tempReminderMinutes by remember { mutableIntStateOf(15) }
 
     // Function to calculate target time based on selected duration
     fun calculateTargetMillis(): Long {
@@ -346,125 +376,33 @@ fun DeepDiveConfigSheet(
             "30 minutes" -> now + (30 * 60 * 1000L)
             "1 hour" -> now + (60 * 60 * 1000L)
             "Custom" -> {
-                if (customTargetMillis > now) customTargetMillis
+                if (customDurationMinutes > 0) now + (customDurationMinutes * 60 * 1000L)
                 else now + (30 * 60 * 1000L) // fallback
             }
             else -> now + (30 * 60 * 1000L)
         }
     }
 
-    // Prune reminders that would be at or after the end time if the duration changes
-    LaunchedEffect(selectedOption, customTargetMillis) {
+    // Prune and recalculate reminders if the duration changes
+    LaunchedEffect(selectedOption, customDurationMinutes) {
         val currentEnd = calculateTargetMillis()
-        if (selectedReminders.any { it.triggerMillis >= currentEnd }) {
-            selectedReminders = selectedReminders.filter { it.triggerMillis < currentEnd }
-        }
-    }
-
-    fun openCustomReminderTimePicker(targetEnd: Long) {
         val now = System.currentTimeMillis()
-        if (targetEnd <= now + 60_000L) {
-            Toast.makeText(context, "No valid reminder time available before the Deep Dive ends.", Toast.LENGTH_SHORT).show()
-            return
+        selectedReminders = selectedReminders.mapNotNull { reminder ->
+            if (reminder.offsetMinutes != null) {
+                val newTrigger = currentEnd - (reminder.offsetMinutes * 60 * 1000L)
+                if (newTrigger > now && newTrigger < currentEnd) {
+                    reminder.copy(triggerMillis = newTrigger)
+                } else {
+                    null // prune if it would fall in the past or at/after session end
+                }
+            } else {
+                if (reminder.triggerMillis < currentEnd && reminder.triggerMillis > now) {
+                    reminder
+                } else {
+                    null
+                }
+            }
         }
-
-        val cal = Calendar.getInstance()
-        val halfway = (now + targetEnd) / 2
-        cal.timeInMillis = halfway
-
-        val is24Hour = DateFormat.is24HourFormat(context)
-        val endFormatted = timeFormatter.format(Date(targetEnd)).lowercase(Locale.getDefault())
-
-        val timePickerDialog = TimePickerDialog(
-            context,
-            { _, hourOfDay, minute ->
-                val currentNow = System.currentTimeMillis()
-                val currentEnd = calculateTargetMillis()
-                val pickedMillis = DeepDiveManager.resolveCustomReminderMillis(
-                    hourOfDay = hourOfDay,
-                    minute = minute,
-                    nowMillis = currentNow,
-                    targetEndMillis = currentEnd
-                )
-
-                if (pickedMillis == null) {
-                    val formattedLimit = timeFormatter.format(Date(currentEnd)).lowercase(Locale.getDefault())
-                    Toast.makeText(
-                        context,
-                        "Reminder must be before the Deep Dive ends (before $formattedLimit).",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    openCustomReminderTimePicker(currentEnd)
-                    return@TimePickerDialog
-                }
-
-                // Final safety net validation (Requirement 9)
-                if (pickedMillis <= currentNow) {
-                    Toast.makeText(context, "Reminder must be in the future.", Toast.LENGTH_SHORT).show()
-                    openCustomReminderTimePicker(currentEnd)
-                    return@TimePickerDialog
-                }
-                if (pickedMillis >= currentEnd) {
-                    Toast.makeText(context, "Reminder must be before the Deep Dive ends.", Toast.LENGTH_SHORT).show()
-                    openCustomReminderTimePicker(currentEnd)
-                    return@TimePickerDialog
-                }
-
-                // Duplicate prevention (Requirement 8)
-                val isDuplicate = selectedReminders.any { Math.abs(it.triggerMillis - pickedMillis) < 60_000L }
-                if (isDuplicate) {
-                    Toast.makeText(context, "A reminder for this time already exists.", Toast.LENGTH_SHORT).show()
-                    return@TimePickerDialog
-                }
-
-                val formatted = timeFormatter.format(Date(pickedMillis)).lowercase(Locale.getDefault())
-                selectedReminders = (selectedReminders + ReminderItem(
-                    id = "custom_${pickedMillis}",
-                    triggerMillis = pickedMillis,
-                    label = "Custom"
-                )).sortedBy { it.triggerMillis }
-            },
-            cal.get(Calendar.HOUR_OF_DAY),
-            cal.get(Calendar.MINUTE),
-            is24Hour
-        )
-        timePickerDialog.setTitle("Reminder (before $endFormatted)")
-        timePickerDialog.show()
-    }
-
-    fun openCustomTimePicker() {
-        val cal = Calendar.getInstance()
-        if (customTargetMillis > System.currentTimeMillis()) {
-            cal.timeInMillis = customTargetMillis
-        } else {
-            cal.add(Calendar.MINUTE, 30)
-        }
-
-        val is24Hour = DateFormat.is24HourFormat(context)
-        val timePickerDialog = TimePickerDialog(
-            context,
-            { _, hourOfDay, minute ->
-                val targetCal = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, hourOfDay)
-                    set(Calendar.MINUTE, minute)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-
-                // If chosen time is earlier today, schedule for next occurrence (tomorrow)
-                if (targetCal.timeInMillis <= System.currentTimeMillis()) {
-                    targetCal.add(Calendar.DAY_OF_YEAR, 1)
-                }
-
-                customTargetMillis = targetCal.timeInMillis
-                customTimeText = timeFormatter.format(targetCal.time).lowercase(Locale.getDefault())
-                selectedOption = "Custom"
-            },
-            cal.get(Calendar.HOUR_OF_DAY),
-            cal.get(Calendar.MINUTE),
-            is24Hour
-        )
-        timePickerDialog.show()
     }
 
     val scrollState = rememberScrollState()
@@ -562,11 +500,17 @@ fun DeepDiveConfigSheet(
                         "30 minutes" -> "until " + timeFormatter.format(Date(now + 30 * 60 * 1000L)).lowercase(Locale.getDefault())
                         "1 hour" -> "until " + timeFormatter.format(Date(now + 60 * 60 * 1000L)).lowercase(Locale.getDefault())
                         "Custom" -> {
-                            if (customTargetMillis > now) {
-                                "until " + timeFormatter.format(Date(customTargetMillis)).lowercase(Locale.getDefault())
+                            if (customDurationMinutes > 0) {
+                                "until " + timeFormatter.format(Date(now + customDurationMinutes * 60 * 1000L)).lowercase(Locale.getDefault())
                             } else null
                         }
                         else -> null
+                    }
+
+                    val displayTitle = if (option == "Custom") {
+                        if (customDurationMinutes > 0) formatDurationLabel(customDurationMinutes) else "Custom"
+                    } else {
+                        option
                     }
 
                     Surface(
@@ -575,7 +519,7 @@ fun DeepDiveConfigSheet(
                             .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 if (option == "Custom") {
-                                    openCustomTimePicker()
+                                    showCustomDurationDialog = true
                                 } else {
                                     selectedOption = option
                                 }
@@ -609,7 +553,7 @@ fun DeepDiveConfigSheet(
                                 )
 
                                 Text(
-                                    text = option,
+                                    text = displayTitle,
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.5.sp
@@ -706,8 +650,22 @@ fun DeepDiveConfigSheet(
                                                 ),
                                                 color = Color(0xFF1E3A8A)
                                             )
+                                            if (!reminder.subLabel.isNullOrEmpty()) {
+                                                Text(
+                                                    text = reminder.subLabel,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    ),
+                                                    color = Color(0xFF1E3A8A).copy(alpha = 0.85f)
+                                                )
+                                            }
                                             Text(
-                                                text = "At ${timeFormatter.format(Date(reminder.triggerMillis)).lowercase(Locale.getDefault())}",
+                                                text = if (reminder.subLabel != null) {
+                                                    timeFormatter.format(Date(reminder.triggerMillis)).lowercase(Locale.getDefault())
+                                                } else {
+                                                    "At ${timeFormatter.format(Date(reminder.triggerMillis)).lowercase(Locale.getDefault())}"
+                                                },
                                                 style = MaterialTheme.typography.bodySmall.copy(
                                                     fontSize = 11.5.sp
                                                 ),
@@ -983,7 +941,16 @@ fun DeepDiveConfigSheet(
                                             Toast.makeText(context, "No valid reminder time available before the Deep Dive ends.", Toast.LENGTH_SHORT).show()
                                         } else {
                                             showAddReminderDialog = false
-                                            openCustomReminderTimePicker(currentTargetEnd)
+                                            val availableMinutes = ((currentTargetEnd - currentNow) / 60000).toInt()
+                                            val initialOffset = when {
+                                                availableMinutes > 30 -> 30
+                                                availableMinutes > 15 -> 15
+                                                availableMinutes > 5 -> 5
+                                                else -> 1
+                                            }
+                                            tempReminderHours = initialOffset / 60
+                                            tempReminderMinutes = initialOffset % 60
+                                            showCustomReminderDurationDialog = true
                                         }
                                     }
                                     .testTag("reminder_option_custom"),
@@ -1032,6 +999,913 @@ fun DeepDiveConfigSheet(
                             modifier = Modifier.testTag("cancel_add_reminder_button")
                         ) {
                             Text("Cancel", color = Color(0xFF756F67))
+                        }
+                    },
+                    containerColor = Color.White,
+                    shape = RoundedCornerShape(20.dp)
+                )
+            }
+
+            // Dialog for choosing custom reminder relative duration
+            if (showCustomReminderDurationDialog) {
+                val currentTargetEnd = calculateTargetMillis()
+                val currentNow = System.currentTimeMillis()
+                val offsetMinutes = tempReminderHours * 60 + tempReminderMinutes
+                val reminderMillis = currentTargetEnd - (offsetMinutes * 60 * 1000L)
+                val isAfterNow = reminderMillis > currentNow
+                val isBeforeEnd = offsetMinutes > 0 && reminderMillis < currentTargetEnd
+                val isValid = isAfterNow && isBeforeEnd
+                val reminderTimeFormatted = timeFormatter.format(Date(reminderMillis)).lowercase(Locale.getDefault())
+
+                val heroDurationText = when {
+                    tempReminderHours == 1 && tempReminderMinutes == 0 -> "1 hour"
+                    tempReminderHours > 1 && tempReminderMinutes == 0 -> "${tempReminderHours} hours"
+                    tempReminderHours > 0 && tempReminderMinutes > 0 -> "${tempReminderHours}h ${tempReminderMinutes}m"
+                    tempReminderMinutes > 0 -> "${tempReminderMinutes}m"
+                    else -> "0m"
+                }
+
+                val subText = when {
+                    offsetMinutes <= 0 -> "Choose how long before session ends"
+                    !isAfterNow -> "Offset is longer than session remaining"
+                    else -> "at $reminderTimeFormatted"
+                }
+
+                val reminderQuickPresets = listOf(
+                    "15m" to 15,
+                    "30m" to 30,
+                    "45m" to 45,
+                    "1h" to 60,
+                    "1h 30m" to 90,
+                    "2h" to 120
+                )
+
+                AlertDialog(
+                    onDismissRequest = { showCustomReminderDurationDialog = false },
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column {
+                                Text(
+                                    text = "DEEP DIVE",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.1.sp,
+                                        fontSize = 11.sp
+                                    ),
+                                    color = NudgeBlue
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Set reminder",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontFamily = FontFamily.Serif,
+                                        fontWeight = FontWeight.Normal,
+                                        fontSize = 20.sp
+                                    ),
+                                    color = Color(0xFF161513)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "How long before the session ends?",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 12.sp
+                                    ),
+                                    color = Color(0xFF756F67)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showCustomReminderDurationDialog = false },
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .testTag("close_custom_reminder_dialog_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = Color(0xFF756F67),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Duration Hero (The visual focus)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 2.dp, bottom = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = heroDurationText,
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        fontFamily = FontFamily.Serif,
+                                        fontWeight = FontWeight.Normal,
+                                        fontSize = 36.sp,
+                                        letterSpacing = (-0.5).sp
+                                    ),
+                                    color = if (isValid) Color(0xFF161513) else Color(0xFF9E9A92),
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = subText,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Normal
+                                    ),
+                                    color = if (isValid) Color(0xFF756F67) else Color(0xFFDC2626),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Unified Stepper Component (Single clean container for Hours + Minutes)
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFFFBFBF9),
+                                border = BorderStroke(1.dp, Color(0xFFECEAE4))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 12.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Hours Column
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "HOURS",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 1.sp,
+                                                fontSize = 10.5.sp
+                                            ),
+                                            color = Color(0xFF756F67)
+                                        )
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (tempReminderHours > 0) Color(0xFFEFF6FF)
+                                                        else Color(0xFFF2F1ED)
+                                                    )
+                                                    .clickable(enabled = tempReminderHours > 0) {
+                                                        tempReminderHours--
+                                                    }
+                                                    .testTag("decrease_reminder_hours"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Remove,
+                                                    contentDescription = "Decrease hours",
+                                                    tint = if (tempReminderHours > 0) NudgeBlue else Color(0xFFB8B3AB),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+
+                                            Text(
+                                                text = "$tempReminderHours",
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 20.sp
+                                                ),
+                                                color = Color(0xFF161513),
+                                                modifier = Modifier.widthIn(min = 22.dp),
+                                                textAlign = TextAlign.Center
+                                            )
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (tempReminderHours < 12) Color(0xFFEFF6FF)
+                                                        else Color(0xFFF2F1ED)
+                                                    )
+                                                    .clickable(enabled = tempReminderHours < 12) {
+                                                        tempReminderHours++
+                                                    }
+                                                    .testTag("increase_reminder_hours"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = "Increase hours",
+                                                    tint = if (tempReminderHours < 12) NudgeBlue else Color(0xFFB8B3AB),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Subtle vertical divider between Hours and Minutes
+                                    Box(
+                                        modifier = Modifier
+                                            .width(1.dp)
+                                            .height(36.dp)
+                                            .background(Color(0xFFE5E2DA))
+                                    )
+
+                                    // Minutes Column
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "MINUTES",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 1.sp,
+                                                fontSize = 10.5.sp
+                                            ),
+                                            color = Color(0xFF756F67)
+                                        )
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (tempReminderMinutes > 0) Color(0xFFEFF6FF)
+                                                        else Color(0xFFF2F1ED)
+                                                    )
+                                                    .clickable(enabled = tempReminderMinutes > 0) {
+                                                        tempReminderMinutes = (tempReminderMinutes - 5).coerceAtLeast(0)
+                                                    }
+                                                    .testTag("decrease_reminder_minutes"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Remove,
+                                                    contentDescription = "Decrease minutes",
+                                                    tint = if (tempReminderMinutes > 0) NudgeBlue else Color(0xFFB8B3AB),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+
+                                            Text(
+                                                text = "$tempReminderMinutes",
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 20.sp
+                                                ),
+                                                color = Color(0xFF161513),
+                                                modifier = Modifier.widthIn(min = 28.dp),
+                                                textAlign = TextAlign.Center
+                                            )
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (tempReminderMinutes < 55) Color(0xFFEFF6FF)
+                                                        else Color(0xFFF2F1ED)
+                                                    )
+                                                    .clickable(enabled = tempReminderMinutes < 55) {
+                                                        tempReminderMinutes = (tempReminderMinutes + 5).coerceAtMost(55)
+                                                    }
+                                                    .testTag("increase_reminder_minutes"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = "Increase minutes",
+                                                    tint = if (tempReminderMinutes < 55) NudgeBlue else Color(0xFFB8B3AB),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Quick choices
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "QUICK CHOICES",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.9.sp,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = Color(0xFF8C867D)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    reminderQuickPresets.take(3).forEach { (label, mins) ->
+                                        val isPresetSelected = offsetMinutes == mins
+                                        val isOptionAllowed = (currentTargetEnd - (mins * 60 * 1000L)) > currentNow
+                                        Surface(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .clickable(enabled = isOptionAllowed) {
+                                                    tempReminderHours = mins / 60
+                                                    tempReminderMinutes = mins % 60
+                                                }
+                                                .testTag("quick_reminder_$mins"),
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = when {
+                                                isPresetSelected -> Color(0xFFEFF6FF)
+                                                !isOptionAllowed -> Color(0xFFF7F6F2).copy(alpha = 0.5f)
+                                                else -> Color(0xFFF7F6F2)
+                                            },
+                                            border = BorderStroke(
+                                                1.dp,
+                                                when {
+                                                    isPresetSelected -> NudgeBlue
+                                                    !isOptionAllowed -> Color(0xFFE8E5DF).copy(alpha = 0.5f)
+                                                    else -> Color(0xFFE8E5DF)
+                                                }
+                                            )
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.padding(vertical = 6.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontWeight = if (isPresetSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        fontSize = 12.sp
+                                                    ),
+                                                    color = when {
+                                                        isPresetSelected -> NudgeBlue
+                                                        !isOptionAllowed -> Color(0xFFB8B3AB)
+                                                        else -> Color(0xFF4A463F)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    reminderQuickPresets.drop(3).forEach { (label, mins) ->
+                                        val isPresetSelected = offsetMinutes == mins
+                                        val isOptionAllowed = (currentTargetEnd - (mins * 60 * 1000L)) > currentNow
+                                        Surface(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .clickable(enabled = isOptionAllowed) {
+                                                    tempReminderHours = mins / 60
+                                                    tempReminderMinutes = mins % 60
+                                                }
+                                                .testTag("quick_reminder_$mins"),
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = when {
+                                                isPresetSelected -> Color(0xFFEFF6FF)
+                                                !isOptionAllowed -> Color(0xFFF7F6F2).copy(alpha = 0.5f)
+                                                else -> Color(0xFFF7F6F2)
+                                            },
+                                            border = BorderStroke(
+                                                1.dp,
+                                                when {
+                                                    isPresetSelected -> NudgeBlue
+                                                    !isOptionAllowed -> Color(0xFFE8E5DF).copy(alpha = 0.5f)
+                                                    else -> Color(0xFFE8E5DF)
+                                                }
+                                            )
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.padding(vertical = 6.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontWeight = if (isPresetSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        fontSize = 12.sp
+                                                    ),
+                                                    color = when {
+                                                        isPresetSelected -> NudgeBlue
+                                                        !isOptionAllowed -> Color(0xFFB8B3AB)
+                                                        else -> Color(0xFF4A463F)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (isValid) {
+                                    // Duplicate prevention
+                                    val isDuplicate = selectedReminders.any { Math.abs(it.triggerMillis - reminderMillis) < 60_000L }
+                                    if (isDuplicate) {
+                                        Toast.makeText(context, "A reminder for this time already exists.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        selectedReminders = (selectedReminders + ReminderItem(
+                                            id = "custom_${reminderMillis}",
+                                            triggerMillis = reminderMillis,
+                                            label = "Custom",
+                                            subLabel = "$heroDurationText before",
+                                            offsetMinutes = offsetMinutes
+                                        )).sortedBy { it.triggerMillis }
+                                        showCustomReminderDurationDialog = false
+                                    }
+                                }
+                            },
+                            enabled = isValid,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NudgeBlue,
+                                disabledContainerColor = Color(0xFFD4D0C8)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("custom_reminder_set_button")
+                        ) {
+                            Text(
+                                text = "Set reminder",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp
+                                ),
+                                color = Color.White
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showCustomReminderDurationDialog = false },
+                            modifier = Modifier.testTag("custom_reminder_cancel_button")
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 14.sp
+                                ),
+                                color = Color(0xFF756F67)
+                            )
+                        }
+                    },
+                    containerColor = Color.White,
+                    shape = RoundedCornerShape(20.dp)
+                )
+            }
+
+            if (showCustomDurationDialog) {
+                var tempHours by remember {
+                    mutableIntStateOf(if (customDurationMinutes > 0) customDurationMinutes / 60 else 1)
+                }
+                var tempMinutes by remember {
+                    mutableIntStateOf(if (customDurationMinutes > 0) customDurationMinutes % 60 else 30)
+                }
+
+                val totalMinutes = tempHours * 60 + tempMinutes
+                val previewEndMillis = System.currentTimeMillis() + (totalMinutes * 60 * 1000L)
+                val previewEndFormatted = timeFormatter.format(Date(previewEndMillis)).lowercase(Locale.getDefault())
+
+                val quickPresets = listOf(
+                    "1h 30m" to 90,
+                    "2h" to 120,
+                    "2h 30m" to 150,
+                    "3h" to 180
+                )
+
+                val heroDurationText = when {
+                    tempHours > 0 && tempMinutes > 0 -> "${tempHours}h ${tempMinutes}m"
+                    tempHours > 0 -> "${tempHours}h"
+                    tempMinutes > 0 -> "${tempMinutes}m"
+                    else -> "0m"
+                }
+
+                AlertDialog(
+                    onDismissRequest = { showCustomDurationDialog = false },
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column {
+                                Text(
+                                    text = "DEEP DIVE",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.1.sp,
+                                        fontSize = 11.sp
+                                    ),
+                                    color = NudgeBlue
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Set duration",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontFamily = FontFamily.Serif,
+                                        fontWeight = FontWeight.Normal,
+                                        fontSize = 20.sp
+                                    ),
+                                    color = Color(0xFF161513)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "How long do you want to stay with this?",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 12.sp
+                                    ),
+                                    color = Color(0xFF756F67)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showCustomDurationDialog = false },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = Color(0xFF756F67),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Duration Hero (The visual focus)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 2.dp, bottom = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = heroDurationText,
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        fontFamily = FontFamily.Serif,
+                                        fontWeight = FontWeight.Normal,
+                                        fontSize = 36.sp,
+                                        letterSpacing = (-0.5).sp
+                                    ),
+                                    color = Color(0xFF161513),
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (totalMinutes > 0) "until $previewEndFormatted" else "Select a duration",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Normal
+                                    ),
+                                    color = Color(0xFF756F67),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Unified Hours & Minutes Stepper Container
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFFFBFBF9),
+                                border = BorderStroke(1.dp, Color(0xFFECEAE4))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 12.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Hours Column
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "HOURS",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 1.sp,
+                                                fontSize = 10.5.sp
+                                            ),
+                                            color = Color(0xFF756F67)
+                                        )
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (tempHours > 0) Color(0xFFEFF6FF)
+                                                        else Color(0xFFF2F1ED)
+                                                    )
+                                                    .clickable(enabled = tempHours > 0) {
+                                                        tempHours--
+                                                    }
+                                                    .testTag("custom_duration_hours_minus"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Remove,
+                                                    contentDescription = "Decrease hours",
+                                                    tint = if (tempHours > 0) NudgeBlue else Color(0xFFB8B3AB),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+
+                                            Text(
+                                                text = "$tempHours",
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 20.sp
+                                                ),
+                                                color = Color(0xFF161513),
+                                                modifier = Modifier.widthIn(min = 22.dp),
+                                                textAlign = TextAlign.Center
+                                            )
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (tempHours < 12) Color(0xFFEFF6FF)
+                                                        else Color(0xFFF2F1ED)
+                                                    )
+                                                    .clickable(enabled = tempHours < 12) {
+                                                        tempHours++
+                                                    }
+                                                    .testTag("custom_duration_hours_plus"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = "Increase hours",
+                                                    tint = if (tempHours < 12) NudgeBlue else Color(0xFFB8B3AB),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Subtle vertical divider between Hours and Minutes
+                                    Box(
+                                        modifier = Modifier
+                                            .width(1.dp)
+                                            .height(36.dp)
+                                            .background(Color(0xFFE5E2DA))
+                                    )
+
+                                    // Minutes Column
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "MINUTES",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 1.sp,
+                                                fontSize = 10.5.sp
+                                            ),
+                                            color = Color(0xFF756F67)
+                                        )
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (tempMinutes > 0) Color(0xFFEFF6FF)
+                                                        else Color(0xFFF2F1ED)
+                                                    )
+                                                    .clickable(enabled = tempMinutes > 0) {
+                                                        tempMinutes = (tempMinutes - 5).coerceAtLeast(0)
+                                                    }
+                                                    .testTag("custom_duration_minutes_minus"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Remove,
+                                                    contentDescription = "Decrease minutes",
+                                                    tint = if (tempMinutes > 0) NudgeBlue else Color(0xFFB8B3AB),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+
+                                            Text(
+                                                text = "$tempMinutes",
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 20.sp
+                                                ),
+                                                color = Color(0xFF161513),
+                                                modifier = Modifier.widthIn(min = 28.dp),
+                                                textAlign = TextAlign.Center
+                                            )
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (tempMinutes < 55) Color(0xFFEFF6FF)
+                                                        else Color(0xFFF2F1ED)
+                                                    )
+                                                    .clickable(enabled = tempMinutes < 55) {
+                                                        tempMinutes = (tempMinutes + 5).coerceAtMost(55)
+                                                    }
+                                                    .testTag("custom_duration_minutes_plus"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = "Increase minutes",
+                                                    tint = if (tempMinutes < 55) NudgeBlue else Color(0xFFB8B3AB),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Quick Choices
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "QUICK CHOICES",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.9.sp,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = Color(0xFF8C867D)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    quickPresets.take(2).forEach { (label, mins) ->
+                                        val isPresetSelected = totalMinutes == mins
+                                        Surface(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .clickable {
+                                                    tempHours = mins / 60
+                                                    tempMinutes = mins % 60
+                                                },
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = if (isPresetSelected) Color(0xFFEFF6FF) else Color(0xFFF7F6F2),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isPresetSelected) NudgeBlue else Color(0xFFE8E5DF)
+                                            )
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.padding(vertical = 6.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontWeight = if (isPresetSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        fontSize = 12.sp
+                                                    ),
+                                                    color = if (isPresetSelected) NudgeBlue else Color(0xFF4A463F)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    quickPresets.drop(2).forEach { (label, mins) ->
+                                        val isPresetSelected = totalMinutes == mins
+                                        Surface(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .clickable {
+                                                    tempHours = mins / 60
+                                                    tempMinutes = mins % 60
+                                                },
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = if (isPresetSelected) Color(0xFFEFF6FF) else Color(0xFFF7F6F2),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isPresetSelected) NudgeBlue else Color(0xFFE8E5DF)
+                                            )
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.padding(vertical = 6.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontWeight = if (isPresetSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        fontSize = 12.sp
+                                                    ),
+                                                    color = if (isPresetSelected) NudgeBlue else Color(0xFF4A463F)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (totalMinutes > 0) {
+                                    customDurationMinutes = totalMinutes
+                                    selectedOption = "Custom"
+                                    showCustomDurationDialog = false
+                                }
+                            },
+                            enabled = totalMinutes > 0,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NudgeBlue,
+                                disabledContainerColor = Color(0xFFD4D0C8)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("custom_duration_set_button")
+                        ) {
+                            Text(
+                                text = "Set duration",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp
+                                ),
+                                color = Color.White
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showCustomDurationDialog = false },
+                            modifier = Modifier.testTag("custom_duration_cancel_button")
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 14.sp
+                                ),
+                                color = Color(0xFF756F67)
+                            )
                         }
                     },
                     containerColor = Color.White,
@@ -1212,8 +2086,8 @@ fun DeepDiveConfigSheet(
                         indication = null,
                         role = Role.Button
                     ) {
-                        if (selectedOption == "Custom" && customTargetMillis <= System.currentTimeMillis()) {
-                            openCustomTimePicker()
+                        if (selectedOption == "Custom" && customDurationMinutes <= 0) {
+                            showCustomDurationDialog = true
                         } else {
                             val targetMillis = calculateTargetMillis()
                             val now = System.currentTimeMillis()

@@ -81,6 +81,24 @@
                 <action android:name="com.example.gentlenudge.ACTION_TRIGGER_AUTO_BACKUP" />
             </intent-filter>
         </receiver>
+
+        <!-- Nudge Analog Clock Home-Screen Widget -->
+        <receiver
+            android:name=".widget.NudgeClockWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_clock_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.gentlenudge.ACTION_UPDATE_CLOCK_WIDGET" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/nudge_clock_widget_info" />
+        </receiver>
     </application>
 
 </manifest>
